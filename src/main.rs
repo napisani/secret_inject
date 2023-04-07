@@ -63,7 +63,6 @@ impl DopplerSecretManagerSource {
                 file.write_all(format!("export {}='{}'\n", key, secret).as_bytes())
                     .unwrap();
             });
-        // file.write_all(session_key.as_bytes())?;
         Ok(())
     }
     fn get_cached_secrets(&self) -> Result<PathBuf, Box<(dyn std::error::Error + 'static)>> {
@@ -78,11 +77,9 @@ impl DopplerSecretManagerSource {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Name of the person to greet
     #[arg(short, long)]
     project: String,
 
-    /// Number of times to greet
     #[arg(short, long)]
     env: String,
 }
