@@ -20,7 +20,6 @@ fn exec_doppler(bw_args: &[&str]) -> Result<String, Box<dyn std::error::Error>> 
         .expect("failed to invoke `doppler` ensure the Doppler CLI is installed and in your PATH");
     if pid.status.success() {
         let out = String::from_utf8_lossy(&pid.stdout).to_string();
-        println!("doppler output: {}", out);
         return Ok(out);
     }
     let out = String::from_utf8_lossy(&pid.stderr).to_string();
@@ -29,7 +28,8 @@ fn exec_doppler(bw_args: &[&str]) -> Result<String, Box<dyn std::error::Error>> 
 
 trait SecretManagerSource {
     fn cache_secrets(&self) -> Result<(), Box<dyn std::error::Error>>;
-    fn get_cached_secrets(&self) -> Result<(), Box<dyn std::error::Error>>;
+    fn get_cached_secrets(&self) -> Result<PathBuf, Box<dyn std::error::Error>>;
+    fn clean_cached_secrets(&self) -> Result<(), Box<dyn std::error::Error>>;
 }
 struct DopplerSecretManagerSource {
     project: String,
@@ -37,9 +37,12 @@ struct DopplerSecretManagerSource {
 }
 
 impl DopplerSecretManagerSource {
-    pub fn new(project: String, env: String) -> DopplerSecretManagerSource {
+    fn new(project: String, env: String) -> DopplerSecretManagerSource {
         DopplerSecretManagerSource { project, env }
     }
+}
+
+impl SecretManagerSource for DopplerSecretManagerSource {
     fn cache_secrets(&self) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         let dir = env::temp_dir();
         let mut file = File::create(dir.join(".sec.key"))?;
@@ -52,7 +55,6 @@ impl DopplerSecretManagerSource {
             &self.env,
         ])?;
         let json_secrets: Value = serde_json::from_str(&output)?;
-        println!("json_secrets: {:?}", json_secrets);
         json_secrets
             .as_object()
             .unwrap()
@@ -73,6 +75,15 @@ impl DopplerSecretManagerSource {
         }
         Ok(file_path)
     }
+
+    fn clean_cached_secrets(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let dir = env::temp_dir();
+        let file_path = dir.join(".sec.key");
+        if file_path.exists() {
+            std::fs::remove_file(file_path)?;
+        }
+        Ok(())
+    }
 }
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -82,10 +93,18 @@ struct Args {
 
     #[arg(short, long)]
     env: String,
+
+    #[arg(short, long)]
+    clean: bool,
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let sec_file = DopplerSecretManagerSource::new(args.project, args.env).get_cached_secrets()?;
+    let source = DopplerSecretManagerSource::new(args.project, args.env);
+    if args.clean {
+        source.clean_cached_secrets()?;
+    }
+    let sec_file: PathBuf = source.get_cached_secrets()?;
     println!("{}", sec_file.to_string_lossy());
     Ok(())
 }
+
