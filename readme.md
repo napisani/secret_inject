@@ -24,3 +24,9 @@ else
   echo "$OUTPUT" >> /dev/stderr
 fi
 ```
+
+### releasing
+```bash
+# cut a release
+cargo release 0.1.0
+```
