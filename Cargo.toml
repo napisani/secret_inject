@@ -2,6 +2,11 @@
 name = "secret_inject"
 version = "0.1.0"
 edition = "2021"
+description = "Inject secrets into your environment"
+license = "MIT"
+repository = "https://github.com/napisani/secret_inject"
+readme = "README.md"
+homepage = "https://github.com/napisani/secret_inject"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
