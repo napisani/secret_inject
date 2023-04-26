@@ -1,5 +1,5 @@
 {
-  description = "dev env for inject_secret";
+  description = "dev env for secret_inject";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
@@ -17,7 +17,7 @@
 
   outputs = { self, nixpkgs, utils, rust-overlay, crate2nix, ... }:
     let
-      name = "inject_secret";
+      name = "secret_inject";
     in
     utils.lib.eachDefaultSystem
       (system:
