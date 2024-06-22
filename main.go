@@ -37,7 +37,7 @@ func main() {
 		panic(err)
 	}
 
-	storage, err := GetStorage()
+	storage, err := GetStorage(fullConfig)
   if err != nil {
     slog.Error("Error getting storage: %s", err)
     panic(err)
