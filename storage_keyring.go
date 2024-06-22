@@ -6,76 +6,70 @@ import (
 	keyring "github.com/99designs/keyring"
 )
 
+const key = "secret_inject"
+
 type KeyringStorage struct {
 	keyring keyring.Keyring
 }
 
 func (s *KeyringStorage) HasCachedSecrets() bool {
-	keys, err := s.keyring.Keys()
+	value, err := s.keyring.Get(key)
 	if err != nil {
 		slog.Debug("Error getting keys: %s", err)
 		return false
 	}
-	return len(keys) > 0
+	return value.Data != nil
 }
 
 func (s *KeyringStorage) GetCachedSecrets() (*Secrets, error) {
 	slog.Debug("Reading cached secrets from %s", fullFilePath)
-	keys, err := s.keyring.Keys()
+	value, err := s.keyring.Get(key)
+	if err != nil {
+		slog.Debug("Error getting key: %s", err)
+		return nil, err
+	}
+
+	secrets, err := Deserialize(value.Data)
 	if err != nil {
 		return nil, err
 	}
-	secrets := NewSecrets()
-	for _, key := range keys {
-		value, err := s.keyring.Get(key)
-		if err != nil {
-			return nil, err
-		}
-		secrets.Entries[key] = string(value.Data)
-	}
-
 	slog.Debug("Read cached secrets: %s", secrets)
 	return secrets, nil
 }
 
 func (s *KeyringStorage) CacheSecrets(secrets *Secrets) error {
 	slog.Debug("Secrets: %s", secrets)
-	for key, value := range secrets.Entries {
-		err := s.keyring.Set(keyring.Item{
-			Key:  key,
-			Data: []byte(value),
-		})
-		if err != nil {
-			slog.Debug("Error caching secrets: %s", err)
-			return err
-		}
+	serializedSecrets, err := secrets.Serialize()
+	if err != nil {
+		return err
 	}
+
+	err = s.keyring.Set(keyring.Item{Key: key, Data: serializedSecrets})
+	if err != nil {
+		return err
+	}
+
 	slog.Debug("Cached secrets to keyring")
 	return nil
 }
 
 func (s *KeyringStorage) CleanCachedSecrets() error {
-	keys, err := s.keyring.Keys()
-	if err != nil {
-		return err
+	if !s.HasCachedSecrets() {
+		slog.Debug("No cached secrets to clean")
+		return nil
 	}
-	for _, key := range keys {
-		err := s.keyring.Remove(key)
-		if err != nil {
-			return err
-		}
-	}
-	slog.Debug("Removed cached secrets from keyring: %s", keys)
-	return nil
+
+	slog.Debug("Removing cached secrets from keyring: %s", key)
+	return s.keyring.Remove(key)
 }
 
 func NewKeyringStorage() (*KeyringStorage, error) {
 	keyring, err := keyring.Open(keyring.Config{
-		ServiceName:              "secret_inject",
-		KeychainTrustApplication: true,
-		KeychainName:             "secret_inject",
-    KeychainSynchronizable: false,
-    KeychainAccessibleWhenUnlocked: true,
+		ServiceName:                    "secret_inject",
+		KeychainTrustApplication:       true,
+		KeychainName:                   "secret_inject",
+		KeychainSynchronizable:         false,
+		KeychainAccessibleWhenUnlocked: true,
 	})
 
 	if err != nil {
