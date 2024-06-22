@@ -23,16 +23,21 @@ func NewSourceDoppler() *SourceDoppler {
 }
 
 func (s *SourceDoppler) Init(fullConfig map[string]interface{}) error {
-	if _, ok := fullConfig["doppler"]; !ok {
+	sources, ok := fullConfig["sources"].(map[string]interface{})
+	if !ok {
+		s.Enabled = false
+		return nil
+	}
+	rawDopplerConfig, ok := sources["doppler"].(map[string]interface{})
+	if !ok {
 		s.Enabled = false
 		return nil
 	}
 
 	s.Enabled = true
 	dopplerConfig := SourceDopplerConfig{}
-	subConfig := fullConfig["doppler"].(map[string]interface{})
-	dopplerConfig.Project = subConfig["project"].(string)
-	dopplerConfig.Env = subConfig["env"].(string)
+	dopplerConfig.Project = rawDopplerConfig["project"].(string)
+	dopplerConfig.Env = rawDopplerConfig["env"].(string)
 
 	s.config = &dopplerConfig
 	return nil

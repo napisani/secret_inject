@@ -7,7 +7,9 @@ type Storage interface {
 	CleanCachedSecrets() error
 }
 
-func GetStorage() Storage {
-	v := NewInsecureFileStorage()
-	return v
+func GetStorage() (Storage, error) {
+	// v := NewInsecureFileStorage()
+  return NewKeyringStorage()
+
+	// return v
 }

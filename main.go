@@ -37,7 +37,11 @@ func main() {
 		panic(err)
 	}
 
-	storage := GetStorage()
+	storage, err := GetStorage()
+  if err != nil {
+    slog.Error("Error getting storage: %s", err)
+    panic(err)
+  }
 
 	if args.Clean {
 		slog.Debug("Cleaning cached secrets")
