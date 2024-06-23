@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
 	"os/exec"
 )
 
@@ -44,10 +43,6 @@ func (s *SourceDoppler) Init(fullConfig map[string]interface{}) error {
 }
 
 func (s *SourceDoppler) GetAllSecrets() (*Secrets, error) {
-	MkdirRecursive(os.TempDir())
-	file, err := CreateFileIfNotExist(fullFilePath)
-	defer file.Close()
-
 	cmd := exec.Command("doppler", "--project", s.config.Project, "--json", "secrets", "--config", s.config.Env)
 	output, err := cmd.Output()
 	if err != nil {

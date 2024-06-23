@@ -22,7 +22,7 @@ func GetStorage(fullConfig map[string]interface{}) (Storage, error) {
 	switch storageType {
 	case "keyring":
 		slog.Debug("Using keyring storage")
-		return NewKeyringStorage()
+		return NewKeyringStorage(storageConfig)
 	case "file":
 		slog.Debug("Using file storage")
 		return NewInsecureFileStorage(), nil

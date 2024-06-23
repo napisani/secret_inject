@@ -4,6 +4,7 @@ import (
 	"flag"
 	"log/slog"
 	"os"
+  "path"
 )
 
 type Args struct {
@@ -12,7 +13,7 @@ type Args struct {
   Debug      bool
 }
 
-var defaultFile = os.Getenv("HOME") + string(os.PathSeparator) + ".config" + string(os.PathSeparator) + ".secret_inject.json"
+var defaultFile = path.Join(os.Getenv("HOME"), ".config", ".secret_inject.json")
 
 func parseArgs() Args {
 	var args Args

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
+	"os"
+	"path"
 
 	keyring "github.com/99designs/keyring"
 )
@@ -22,7 +25,7 @@ func (s *KeyringStorage) HasCachedSecrets() bool {
 }
 
 func (s *KeyringStorage) GetCachedSecrets() (*Secrets, error) {
-	slog.Debug("Reading cached secrets from %s", fullFilePath)
+	slog.Debug("Reading cached secrets from keyring")
 	value, err := s.keyring.Get(key)
 	if err != nil {
 		slog.Debug("Error getting key: %s", err)
@@ -63,14 +66,57 @@ func (s *KeyringStorage) CleanCachedSecrets() error {
 	return s.keyring.Remove(key)
 }
 
-func NewKeyringStorage() (*KeyringStorage, error) {
-	keyring, err := keyring.Open(keyring.Config{
-		ServiceName:                    "secret_inject",
+func NewKeyringStorage(storageConfig map[string]interface{}) (*KeyringStorage, error) {
+	name := "secret_inject"
+
+	allowedBackends := []keyring.BackendType{}
+	allowedBackendsRaw, ok := storageConfig["allowed_backends"].([]interface{})
+	if !ok || len(allowedBackendsRaw) == 0 {
+		allowedBackendsRaw = nil
+	} else {
+		availableBackends := keyring.AvailableBackends()
+		for _, backend := range allowedBackendsRaw {
+			str := fmt.Sprintf("%v", backend)
+			for _, availableBackend := range availableBackends {
+				if str == string(availableBackend) {
+					allowedBackends = append(allowedBackends, availableBackend)
+				}
+			}
+		}
+	}
+
+	slog.Debug("Allowed backends: %s", allowedBackends)
+
+	tmpDir := os.TempDir()
+	filePath := path.Join(tmpDir, ".keyring.jwt")
+
+	masterPassword, ok := storageConfig["password"]
+	if !ok {
+		masterPassword = ""
+	}
+
+	getPassword := func(prompt string) (string, error) {
+		if masterPassword != "" {
+			return fmt.Sprintf("%v", masterPassword), nil
+		}
+		return GetPasswordStdin(prompt)
+	}
+
+	keyringConfig := keyring.Config{
+		AllowedBackends:                allowedBackends,
+		ServiceName:                    name,
 		KeychainTrustApplication:       true,
-		KeychainName:                   "secret_inject",
+		KeychainName:                   name,
+		KWalletAppID:                   name,
 		KeychainSynchronizable:         false,
 		KeychainAccessibleWhenUnlocked: true,
-	})
+		FilePasswordFunc:               getPassword,
+		KeychainPasswordFunc:           getPassword,
+		FileDir:                        filePath,
+	}
+
+	slog.Debug("Keyring config: %s", keyringConfig)
+	keyring, err := keyring.Open(keyringConfig)
 
 	if err != nil {
 		return nil, err
