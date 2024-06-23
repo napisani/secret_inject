@@ -5,69 +5,59 @@
         "systems": "systems"
       },
       "locked": {
-        "lastModified": 1705309234,
-        "narHash": "sha256-uNRRNRKmJyCRC/8y1RqBkqWBLM034y4qN7EprSdmgyA=",
+        "lastModified": 1710146030,
+        "narHash": "sha256-SZ5L6eA7HJ/nmkzGG7/ISclqe6oZdOZTNoesiInkXPQ=",
         "owner": "numtide",
         "repo": "flake-utils",
-        "rev": "1ef2e671c3b0c19053962c07dbda38332dcebf26",
+        "rev": "b1d9ab70662946ef0850d488da1c9019f3a9752a",
         "type": "github"
       },
       "original": {
-        "id": "flake-utils",
-        "type": "indirect"
-      }
-    },
-    "golang_dep": {
-      "locked": {
-        "lastModified": 1707588924,
-        "narHash": "sha256-0e1ce6X5ghapv6cAF9rxLZKeNyFHHXsLbGxN2cQQE8U=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "10b813040df67c4039086db0f6eaf65c536886c6",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "10b813040df67c4039086db0f6eaf65c536886c6",
+        "owner": "numtide",
+        "repo": "flake-utils",
         "type": "github"
       }
     },
-    "goreleaser_dep": {
+    "goflake": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
       "locked": {
-        "lastModified": 1707588924,
-        "narHash": "sha256-0e1ce6X5ghapv6cAF9rxLZKeNyFHHXsLbGxN2cQQE8U=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "10b813040df67c4039086db0f6eaf65c536886c6",
+        "lastModified": 1680659771,
+        "narHash": "sha256-5Gli0PdnZh2rUQTDapyz0pDG+yzRq5AAPoMpZkdMaGQ=",
+        "owner": "sagikazarmark",
+        "repo": "go-flake",
+        "rev": "1a32d77792361575b617f7e52f107273ef4ba723",
         "type": "github"
       },
       "original": {
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "10b813040df67c4039086db0f6eaf65c536886c6",
+        "owner": "sagikazarmark",
+        "repo": "go-flake",
         "type": "github"
       }
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1699343069,
-        "narHash": "sha256-s7BBhyLA6MI6FuJgs4F/SgpntHBzz40/qV0xLPW6A1Q=",
+        "lastModified": 1707588924,
+        "narHash": "sha256-0e1ce6X5ghapv6cAF9rxLZKeNyFHHXsLbGxN2cQQE8U=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "ec750fd01963ab6b20ee1f0cb488754e8036d89d",
+        "rev": "10b813040df67c4039086db0f6eaf65c536886c6",
         "type": "github"
       },
       "original": {
-        "id": "nixpkgs",
-        "type": "indirect"
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "10b813040df67c4039086db0f6eaf65c536886c6",
+        "type": "github"
       }
     },
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
-        "golang_dep": "golang_dep",
-        "goreleaser_dep": "goreleaser_dep",
+        "goflake": "goflake",
         "nixpkgs": "nixpkgs"
       }
     },
