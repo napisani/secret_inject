@@ -1,4 +1,5 @@
-package main
+package storage
+
 import (
 	"fmt"
 	"os"
@@ -6,7 +7,7 @@ import (
 	"golang.org/x/term"
 )
 
-func GetPasswordStdin(prompt string) (string, error) {
+func getPasswordStdin(prompt string) (string, error) {
 	fmt.Printf("%s: ", prompt)
 	b, err := term.ReadPassword(int(os.Stdin.Fd()))
 	if err != nil {
