@@ -48,6 +48,14 @@ func parseArgs() Args {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "config" {
+		if err := runConfigCommand(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "Error:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	args := parseArgs()
 
 	// Handle version flag
@@ -93,8 +101,21 @@ func main() {
 	}
 
 	// Initialize sources
-	sources := []source.Source{
-		source.NewDoppler(),
+	fullConfig := make(map[string]interface{})
+	fullConfig["sources"] = cfg.Sources
+	fullConfig["storage"] = cfg.Storage
+	if len(cfg.SourceSequence) > 0 {
+		fullConfig["source_sequence"] = cfg.SourceSequence
+	}
+
+	sources, err := source.LoadAll(fullConfig)
+	if err != nil {
+		slog.Error("Error loading sources", "error", err)
+		os.Exit(1)
+	}
+
+	if len(sources) == 0 {
+		slog.Debug("No sources enabled, continuing with empty secrets")
 	}
 
 	secrets := secret.New()
@@ -120,25 +141,14 @@ func main() {
 	if !useCached {
 		slog.Debug("Fetching secrets from sources")
 
-		// Convert config to map for backward compatibility
-		fullConfig := make(map[string]interface{})
-		fullConfig["sources"] = cfg.Sources
-		fullConfig["storage"] = cfg.Storage
-
 		for _, src := range sources {
-			err := src.Init(fullConfig)
-			if err != nil {
-				slog.Error("Error initializing source", "error", err)
-				os.Exit(1)
-			}
-
 			// Check if source is enabled
 			if !src.IsEnabled() {
 				slog.Debug("Source disabled, skipping")
 				continue
 			}
 
-			moreSecrets, err := src.GetAllSecrets()
+			moreSecrets, err := src.GetAllSecrets(secrets)
 			if err != nil {
 				slog.Error("Error getting secrets", "error", err)
 				os.Exit(1)

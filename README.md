@@ -4,6 +4,8 @@ A CLI tool for fetching secrets from external secret managers, caching them loca
 
 Currently supports:
 - **Doppler** secret management (via `doppler` CLI)
+- **1Password** secret retrieval (via `op` CLI and service accounts)
+- **Bitwarden Secrets Manager** (via `bws` CLI access tokens)
 - **Keyring** storage (macOS Keychain, Windows Credential Manager, Linux secret service, etc.)
 - **File** storage (for development, stores in temp directory)
 
@@ -15,6 +17,7 @@ Currently supports:
 - 📤 Multiple output formats (shell, JSON, env file)
 - ✅ Proper error handling (no panics!)
 - 🧪 Unit tested
+- 🛠️ Built-in config helper (`secret_inject config`)
 - 📦 Clean package structure
 
 ## Installation
@@ -69,12 +72,31 @@ make install
 | `--ttl` | `1h` | Cache TTL duration (e.g., '1h', '30m', '24h') |
 | `--output` | `shell` | Output format: shell, json, env |
 | `--version` | - | Print version information |
+ 
+### Config Helper
+
+Bootstrap or edit your config file without copying templates manually:
+
+```bash
+# Create a new config (fails if the file already exists)
+secret_inject config init --config ~/.config/.secret_inject.json
+
+# Overwrite an existing file
+secret_inject config init --force --config ~/.config/.secret_inject.json
+
+# Open the config in your preferred editor ($EDITOR or vi)
+secret_inject config edit --config ~/.config/.secret_inject.json
+```
+
+Use `--editor` to override the editor for a single invocation (for example `--editor "code --wait"`).
 
 ## Configuration
+
 
 ### Config File Format
 ```json
 {
+  "source_sequence": ["doppler", "onepassword", "bitwarden"],
   "sources": {
     "doppler": {
       "env": "dev",
@@ -88,6 +110,73 @@ make install
   }
 }
 ```
+
+### Source Options
+
+Sources are fetched in `source_sequence` order. Secrets from earlier sources are exported as environment variables when invoking later source CLIs, so you can chain dependencies (for example, `OP_SERVICE_ACCOUNT_TOKEN` coming from Doppler before 1Password runs).
+
+#### Doppler
+Configured identically to previous releases. Provide the project and config name to fetch with the `doppler` CLI:
+
+```json
+{
+  "sources": {
+    "doppler": {
+      "project": "my-project",
+      "env": "dev"
+    }
+  }
+}
+```
+
+#### 1Password (`op` CLI)
+Requirements:
+- Install the [1Password CLI](https://developer.1password.com/docs/cli) and ensure `op` is on your `PATH`.
+- Authenticate non-interactively using a service account token (`OP_SERVICE_ACCOUNT_TOKEN`) or an existing desktop session, per the [1Password docs](https://developer.1password.com/docs/cli/sign-in-overview).
+
+Define a mapping from environment variable names to secret references:
+
+```json
+{
+  "sources": {
+    "onepassword": {
+      "secrets": {
+        "API_TOKEN": "op://Production/API/token",
+        "DB_USER": "op://Production/Database/username"
+      }
+    }
+  }
+}
+```
+
+Each value must be a valid secret reference (vault/item[/section]/field). The CLI resolves the references at runtime, so secrets remain outside the config file.
+
+#### Bitwarden Secrets Manager (`bws` CLI)
+Requirements:
+- Install the [Bitwarden Secrets Manager CLI](https://bitwarden.com/help/cli/secrets-manager-cli/) (`bws`).
+- Export a machine account access token (`BWS_ACCESS_TOKEN`) before running `secret_inject`.
+
+Secrets can be referenced directly by ID or resolved by key within an optional project:
+
+```json
+{
+  "sources": {
+    "bitwarden": {
+      "secrets": {
+        "DB_PASSWORD": "382580ab-1368-4e85-bfa3-b02e01400c9f",
+        "API_TOKEN": {
+          "key": "api-token",
+          "project_id": "e325ea69-a3ab-4dff-836f-b02e013fe530"
+        }
+      }
+    }
+  }
+}
+```
+
+Use the string form when you know the secret's UUID. The object form lets you locate a secret by its `key` inside an optional Bitwarden project. If a project is not specified, all accessible secrets are searched.
+
+> Each source verifies the required CLI is installed before enabling itself. Missing CLIs leave the source disabled so other providers can still run.
 
 ### Storage Options
 

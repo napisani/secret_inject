@@ -9,8 +9,9 @@ import (
 )
 
 type Config struct {
-	Sources map[string]interface{} `json:"sources"`
-	Storage map[string]interface{} `json:"storage"`
+	Sources        map[string]interface{} `json:"sources"`
+	Storage        map[string]interface{} `json:"storage"`
+	SourceSequence []string               `json:"source_sequence"`
 }
 
 func ReadConfig(filename string) (*Config, error) {

@@ -3,7 +3,7 @@ package source
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
+	"strings"
 
 	"github.com/napisani/secret_inject/internal/secret"
 )
@@ -16,6 +16,10 @@ type DopplerConfig struct {
 type Doppler struct {
 	config  *DopplerConfig
 	enabled bool
+}
+
+func init() {
+	registerSource("doppler", func() Source { return NewDoppler() })
 }
 
 func NewDoppler() *Doppler {
@@ -39,7 +43,6 @@ func (s *Doppler) Init(fullConfig map[string]interface{}) error {
 	s.enabled = true
 	dopplerConfig := DopplerConfig{}
 
-	// Safely extract project with validation
 	project, ok := rawDopplerConfig["project"].(string)
 	if !ok || project == "" {
 		s.enabled = false
@@ -47,7 +50,6 @@ func (s *Doppler) Init(fullConfig map[string]interface{}) error {
 	}
 	dopplerConfig.Project = project
 
-	// Safely extract env with validation
 	env, ok := rawDopplerConfig["env"].(string)
 	if !ok || env == "" {
 		s.enabled = false
@@ -55,27 +57,40 @@ func (s *Doppler) Init(fullConfig map[string]interface{}) error {
 	}
 	dopplerConfig.Env = env
 
+	if _, err := lookupBinary("doppler"); err != nil {
+		s.enabled = false
+		return fmt.Errorf("doppler CLI not found: %w", err)
+	}
+
 	s.config = &dopplerConfig
 	return nil
 }
 
-func (s *Doppler) GetAllSecrets() (*secret.Secrets, error) {
-	cmd := exec.Command("doppler", "--project", s.config.Project, "--json", "secrets", "--config", s.config.Env)
-	output, err := cmd.Output()
+func (s *Doppler) GetAllSecrets(previous *secret.Secrets) (*secret.Secrets, error) {
+	env := buildCommandEnv(previous)
+	output, err := runCLICommand("doppler", env, "--project", s.config.Project, "--json", "secrets", "--config", s.config.Env)
 	if err != nil {
 		return nil, err
 	}
 
 	var dopplerOutput map[string]interface{}
-	err = json.Unmarshal(output, &dopplerOutput)
-	if err != nil {
+	if err := json.Unmarshal(output, &dopplerOutput); err != nil {
 		return nil, err
 	}
 
 	secrets := secret.New()
 	for key, value := range dopplerOutput {
-		secretValue := value.(map[string]interface{})["computed"].(string)
-		secrets.Entries[key] = secretValue
+		entry, ok := value.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("unexpected doppler secret format for %s", key)
+		}
+
+		computed, ok := entry["computed"].(string)
+		if !ok {
+			return nil, fmt.Errorf("doppler secret missing computed field for %s", key)
+		}
+
+		secrets.Entries[key] = strings.TrimSpace(computed)
 	}
 
 	return secrets, nil
