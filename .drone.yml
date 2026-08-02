@@ -4,7 +4,7 @@ type: kubernetes
 name: default
 
 steps:
-- name: greeting
-  image: golang:1.22
+- name: build
+  image: golang:1.24
   commands:
-  - go build -o secret_inject .
+  - go build -o secret_inject ./cmd/secret_inject
