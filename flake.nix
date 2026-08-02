@@ -4,33 +4,26 @@
 
   # Nixpkgs / NixOS version to use.
   inputs = {
-    nixpkgs.url =
-      "github:NixOS/nixpkgs/10b813040df67c4039086db0f6eaf65c536886c6";
+    nixpkgs.url = "github:NixOS/nixpkgs/38a4887411571457d700c51c64a6e49ead2ed5ab";
     flake-utils.url = "github:numtide/flake-utils";
-    goflake.url = "github:sagikazarmark/go-flake";
-    goflake.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, flake-utils, goflake, ... }:
+  outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        buildDeps = with pkgs; [ git go_1_22 gnumake ];
+        buildDeps = with pkgs; [ git go_1_25 gnumake ];
         devDeps = with pkgs; buildDeps ++ [ gotools goreleaser ];
 
         # Generate a user-friendly version number.
         version = builtins.substring 0 8 self.lastModifiedDate;
 
       in {
-        packages.default = pkgs.buildGo122Module {
+        packages.default = pkgs.buildGoModule {
           pname = "secret_inject";
           inherit version;
-          # In 'nix develop', we don't need a copy of the source tree
-          # in the Nix store.
           src = ./.;
-
-          # Specify the main package location
           subPackages = [ "cmd/secret_inject" ];
 
           # This hash locks the dependencies of this package. It is
@@ -43,7 +36,9 @@
           # remeber to bump this hash when your dependencies change.
           #vendorSha256 = pkgs.lib.fakeSha256;
 
-          vendorHash = "sha256-NzI/Ms98diZFHXeRdEE/XDlGaCOBtBQEogLxAuRZwQQ=";
+          # Set to the actual hash after first build, or run `nix build 2>&1 | grep "got:"`
+          # to extract the correct hash
+          vendorHash = "sha256-Ytw9B8brQuYhhWJr91MgN5BybYayNLNgI2TFX41rDsc=";
         };
 
         devShells.default = pkgs.mkShell { buildInputs = devDeps; };

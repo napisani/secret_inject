@@ -18,46 +18,25 @@
         "type": "github"
       }
     },
-    "goflake": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1680659771,
-        "narHash": "sha256-5Gli0PdnZh2rUQTDapyz0pDG+yzRq5AAPoMpZkdMaGQ=",
-        "owner": "sagikazarmark",
-        "repo": "go-flake",
-        "rev": "1a32d77792361575b617f7e52f107273ef4ba723",
-        "type": "github"
-      },
-      "original": {
-        "owner": "sagikazarmark",
-        "repo": "go-flake",
-        "type": "github"
-      }
-    },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1707588924,
-        "narHash": "sha256-0e1ce6X5ghapv6cAF9rxLZKeNyFHHXsLbGxN2cQQE8U=",
+        "lastModified": 1785141334,
+        "narHash": "sha256-kh35kIx7el4Jk8Ki3BH9/Pn1eZYSYLJ6LMALos0zOy0=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "10b813040df67c4039086db0f6eaf65c536886c6",
+        "rev": "38a4887411571457d700c51c64a6e49ead2ed5ab",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "10b813040df67c4039086db0f6eaf65c536886c6",
+        "rev": "38a4887411571457d700c51c64a6e49ead2ed5ab",
         "type": "github"
       }
     },
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
-        "goflake": "goflake",
         "nixpkgs": "nixpkgs"
       }
     },
