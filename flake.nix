@@ -38,7 +38,7 @@
 
           # Set to the actual hash after first build, or run `nix build 2>&1 | grep "got:"`
           # to extract the correct hash
-          vendorHash = "sha256-NzI/Ms98diZFHXeRdEE/XDlGaCOBtBQEogLxAuRZwQQ=";
+          vendorHash = "sha256-Ytw9B8brQuYhhWJr91MgN5BybYayNLNgI2TFX41rDsc=";
         };
 
         devShells.default = pkgs.mkShell { buildInputs = devDeps; };
