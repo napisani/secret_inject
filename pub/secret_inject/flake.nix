@@ -4,7 +4,7 @@
 
   # Nixpkgs / NixOS version to use.
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/38a4887411571457d700c51c64a6e49ead2ed5ab";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
