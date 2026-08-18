@@ -28,14 +28,8 @@ func NewDoppler() *Doppler {
 	}
 }
 
-func (s *Doppler) Init(fullConfig map[string]interface{}) error {
-	sources, ok := fullConfig["sources"].(map[string]interface{})
-	if !ok {
-		s.enabled = false
-		return nil
-	}
-	rawDopplerConfig, ok := sources["doppler"].(map[string]interface{})
-	if !ok {
+func (s *Doppler) Init(config map[string]interface{}) error {
+	if config == nil {
 		s.enabled = false
 		return nil
 	}
@@ -43,14 +37,14 @@ func (s *Doppler) Init(fullConfig map[string]interface{}) error {
 	s.enabled = true
 	dopplerConfig := DopplerConfig{}
 
-	project, ok := rawDopplerConfig["project"].(string)
+	project, ok := config["project"].(string)
 	if !ok || project == "" {
 		s.enabled = false
 		return fmt.Errorf("doppler source requires 'project' field")
 	}
 	dopplerConfig.Project = project
 
-	env, ok := rawDopplerConfig["env"].(string)
+	env, ok := config["env"].(string)
 	if !ok || env == "" {
 		s.enabled = false
 		return fmt.Errorf("doppler source requires 'env' field")

@@ -37,20 +37,13 @@ func NewBitwarden() *Bitwarden {
 	}
 }
 
-func (s *Bitwarden) Init(fullConfig map[string]interface{}) error {
-	sources, ok := fullConfig["sources"].(map[string]interface{})
-	if !ok {
+func (s *Bitwarden) Init(config map[string]interface{}) error {
+	if config == nil {
 		s.enabled = false
 		return nil
 	}
 
-	rawConfig, ok := sources["bitwarden"].(map[string]interface{})
-	if !ok {
-		s.enabled = false
-		return nil
-	}
-
-	rawSecrets, ok := rawConfig["secrets"].(map[string]interface{})
+	rawSecrets, ok := config["secrets"].(map[string]interface{})
 	if !ok || len(rawSecrets) == 0 {
 		s.enabled = false
 		return fmt.Errorf("bitwarden source requires a non-empty 'secrets' map")

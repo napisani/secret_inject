@@ -20,20 +20,13 @@ func NewOnePassword() *OnePassword {
 	return &OnePassword{}
 }
 
-func (s *OnePassword) Init(fullConfig map[string]interface{}) error {
-	sources, ok := fullConfig["sources"].(map[string]interface{})
-	if !ok {
+func (s *OnePassword) Init(config map[string]interface{}) error {
+	if config == nil {
 		s.enabled = false
 		return nil
 	}
 
-	rawConfig, ok := sources["onepassword"].(map[string]interface{})
-	if !ok {
-		s.enabled = false
-		return nil
-	}
-
-	rawSecrets, ok := rawConfig["secrets"].(map[string]interface{})
+	rawSecrets, ok := config["secrets"].(map[string]interface{})
 	if !ok || len(rawSecrets) == 0 {
 		s.enabled = false
 		return fmt.Errorf("onepassword source requires a non-empty 'secrets' map")

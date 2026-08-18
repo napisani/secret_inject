@@ -101,14 +101,7 @@ func main() {
 	}
 
 	// Initialize sources
-	fullConfig := make(map[string]interface{})
-	fullConfig["sources"] = cfg.Sources
-	fullConfig["storage"] = cfg.Storage
-	if len(cfg.SourceSequence) > 0 {
-		fullConfig["source_sequence"] = cfg.SourceSequence
-	}
-
-	sources, err := source.LoadAll(fullConfig)
+	sources, err := source.LoadAll(cfg.Sources, cfg.SourceSequence)
 	if err != nil {
 		slog.Error("Error loading sources", "error", err)
 		os.Exit(1)

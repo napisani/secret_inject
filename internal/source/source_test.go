@@ -35,33 +35,29 @@ func hasEnvVar(env []string, key string, value string) bool {
 
 func TestLoadAllReturnsErrorForUnknownSource(t *testing.T) {
 	cfg := map[string]interface{}{
-		"sources": map[string]interface{}{
-			"unknown": map[string]interface{}{},
-		},
+		"unknown": map[string]interface{}{},
 	}
 
-	if _, err := LoadAll(cfg); err == nil {
+	if _, err := LoadAll(cfg, nil); err == nil {
 		t.Fatalf("expected error for unknown source")
 	}
 }
 
 func TestLoadAllRespectsSequence(t *testing.T) {
+	sequence := []string{"onepassword", "doppler"}
 	cfg := map[string]interface{}{
-		"source_sequence": []interface{}{"onepassword", "doppler"},
-		"sources": map[string]interface{}{
-			"doppler": map[string]interface{}{
-				"project": "proj",
-				"env":     "dev",
+		"doppler": map[string]interface{}{
+			"project": "proj",
+			"env":     "dev",
+		},
+		"onepassword": map[string]interface{}{
+			"secrets": map[string]interface{}{
+				"API_KEY": "op://vault/item/password",
 			},
-			"onepassword": map[string]interface{}{
-				"secrets": map[string]interface{}{
-					"API_KEY": "op://vault/item/password",
-				},
-			},
-			"bitwarden": map[string]interface{}{
-				"secrets": map[string]interface{}{
-					"DB_PASSWORD": "123",
-				},
+		},
+		"bitwarden": map[string]interface{}{
+			"secrets": map[string]interface{}{
+				"DB_PASSWORD": "123",
 			},
 		},
 	}
@@ -71,7 +67,7 @@ func TestLoadAllRespectsSequence(t *testing.T) {
 	})
 	defer cleanup()
 
-	sources, err := LoadAll(cfg)
+	sources, err := LoadAll(cfg, sequence)
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}
@@ -93,12 +89,10 @@ func TestLoadAllRespectsSequence(t *testing.T) {
 
 func TestOnePasswordSourceFetchesSecrets(t *testing.T) {
 	cfg := map[string]interface{}{
-		"sources": map[string]interface{}{
-			"onepassword": map[string]interface{}{
-				"secrets": map[string]interface{}{
-					"API_KEY":  "op://vault/item/password",
-					"USERNAME": "op://vault/item/username",
-				},
+		"onepassword": map[string]interface{}{
+			"secrets": map[string]interface{}{
+				"API_KEY":  "op://vault/item/password",
+				"USERNAME": "op://vault/item/username",
 			},
 		},
 	}
@@ -127,7 +121,7 @@ func TestOnePasswordSourceFetchesSecrets(t *testing.T) {
 	})
 	defer cleanup()
 
-	sources, err := LoadAll(cfg)
+	sources, err := LoadAll(cfg, nil)
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}
@@ -167,11 +161,9 @@ func TestOnePasswordSourceFetchesSecrets(t *testing.T) {
 
 func TestOnePasswordInitMissingCLI(t *testing.T) {
 	cfg := map[string]interface{}{
-		"sources": map[string]interface{}{
-			"onepassword": map[string]interface{}{
-				"secrets": map[string]interface{}{
-					"API_KEY": "op://vault/item/password",
-				},
+		"onepassword": map[string]interface{}{
+			"secrets": map[string]interface{}{
+				"API_KEY": "op://vault/item/password",
 			},
 		},
 	}
@@ -181,21 +173,19 @@ func TestOnePasswordInitMissingCLI(t *testing.T) {
 	})
 	defer cleanup()
 
-	if _, err := LoadAll(cfg); err == nil {
+	if _, err := LoadAll(cfg, nil); err == nil {
 		t.Fatalf("expected error when op CLI missing")
 	}
 }
 
 func TestBitwardenSourceFetchesByIDAndKey(t *testing.T) {
 	cfg := map[string]interface{}{
-		"sources": map[string]interface{}{
-			"bitwarden": map[string]interface{}{
-				"secrets": map[string]interface{}{
-					"DB_PASSWORD": "123",
-					"API_TOKEN": map[string]interface{}{
-						"key":        "api-token",
-						"project_id": "proj-1",
-					},
+		"bitwarden": map[string]interface{}{
+			"secrets": map[string]interface{}{
+				"DB_PASSWORD": "123",
+				"API_TOKEN": map[string]interface{}{
+					"key":        "api-token",
+					"project_id": "proj-1",
 				},
 			},
 		},
@@ -223,7 +213,7 @@ func TestBitwardenSourceFetchesByIDAndKey(t *testing.T) {
 	})
 	defer cleanup()
 
-	sources, err := LoadAll(cfg)
+	sources, err := LoadAll(cfg, nil)
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}
@@ -267,36 +257,30 @@ func TestBitwardenInitValidations(t *testing.T) {
 
 	cases := []map[string]interface{}{
 		{
-			"sources": map[string]interface{}{
-				"bitwarden": map[string]interface{}{
-					"secrets": map[string]interface{}{},
-				},
+			"bitwarden": map[string]interface{}{
+				"secrets": map[string]interface{}{},
 			},
 		},
 		{
-			"sources": map[string]interface{}{
-				"bitwarden": map[string]interface{}{
-					"secrets": map[string]interface{}{
-						"MISSING": map[string]interface{}{},
-					},
+			"bitwarden": map[string]interface{}{
+				"secrets": map[string]interface{}{
+					"MISSING": map[string]interface{}{},
 				},
 			},
 		},
 	}
 
 	for _, cfg := range cases {
-		if _, err := LoadAll(cfg); err == nil {
+		if _, err := LoadAll(cfg, nil); err == nil {
 			t.Fatalf("expected validation error for cfg %v", cfg)
 		}
 	}
 }
 
 func TestSourcesDisableWhenLookupFails(t *testing.T) {
-	cfg := map[string]interface{}{
-		"sources": map[string]interface{}{},
-	}
+	cfg := map[string]interface{}{}
 
-	sources, err := LoadAll(cfg)
+	sources, err := LoadAll(cfg, nil)
 	if err != nil {
 		t.Fatalf("LoadAll unexpected error: %v", err)
 	}
@@ -310,7 +294,7 @@ func TestSourcesDisableWhenLookupFails(t *testing.T) {
 	defer cleanup()
 
 	bw := NewBitwarden()
-	if err := bw.Init(map[string]interface{}{"sources": map[string]interface{}{}}); err != nil {
+	if err := bw.Init(nil); err != nil {
 		t.Fatalf("Init should ignore missing config: %v", err)
 	}
 
@@ -319,7 +303,7 @@ func TestSourcesDisableWhenLookupFails(t *testing.T) {
 	}
 
 	op := NewOnePassword()
-	if err := op.Init(map[string]interface{}{"sources": map[string]interface{}{}}); err != nil {
+	if err := op.Init(nil); err != nil {
 		t.Fatalf("Init should ignore missing config: %v", err)
 	}
 
