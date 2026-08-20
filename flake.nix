@@ -4,7 +4,7 @@
 
   # Nixpkgs / NixOS version to use.
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/38a4887411571457d700c51c64a6e49ead2ed5ab";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -13,7 +13,7 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        buildDeps = with pkgs; [ git go_1_25 gnumake ];
+        buildDeps = with pkgs; [ git go gnumake ];
         devDeps = with pkgs; buildDeps ++ [ gotools goreleaser ];
 
         # Generate a user-friendly version number.

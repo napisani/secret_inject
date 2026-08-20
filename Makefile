@@ -20,4 +20,9 @@ clean:
 install:
 	go install -ldflags "$(LDFLAGS)" ./cmd/secret_inject
 
-.PHONY: all build test clean install
+# Recompute flake.nix's vendorHash after a go.mod/go.sum change (see
+# scripts/update-vendor-hash.sh for how).
+update-vendor-hash:
+	./scripts/update-vendor-hash.sh
+
+.PHONY: all build test clean install update-vendor-hash
