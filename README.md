@@ -176,7 +176,7 @@ Secrets can be referenced directly by ID or resolved by key within an optional p
 
 Use the string form when you know the secret's UUID. The object form lets you locate a secret by its `key` inside an optional Bitwarden project. If a project is not specified, all accessible secrets are searched.
 
-> Each source verifies the required CLI is installed before enabling itself. Missing CLIs leave the source disabled so other providers can still run.
+> Each configured source checks that its CLI is installed when `secret_inject` starts. A missing CLI is an error: `secret_inject` exits without fetching secrets from any source. To run without a provider, remove its entry from `sources` or set it to `null`.
 
 ### Storage Options
 
