@@ -15,6 +15,31 @@ type bitwardenSecretConfig struct {
 	projectID string
 }
 
+type bitwardenConfig struct {
+	Secrets map[string]bitwardenRef `json:"secrets"`
+}
+
+// bitwardenRef is either a bare secret ID string or an object naming the
+// secret by "id", or by "key" within an optional "project_id".
+type bitwardenRef struct {
+	ID        string `json:"id"`
+	Key       string `json:"key"`
+	ProjectID string `json:"project_id"`
+	bare      bool
+}
+
+func (r *bitwardenRef) UnmarshalJSON(data []byte) error {
+	if len(data) > 0 && data[0] == '"' {
+		r.bare = true
+		return json.Unmarshal(data, &r.ID)
+	}
+	type fields bitwardenRef
+	if err := json.Unmarshal(data, (*fields)(r)); err != nil {
+		return fmt.Errorf("must be a string or object: %w", err)
+	}
+	return nil
+}
+
 type Bitwarden struct {
 	byID    []bitwardenSecretConfig
 	byKey   map[string][]bitwardenSecretConfig
@@ -37,54 +62,38 @@ func NewBitwarden() *Bitwarden {
 	}
 }
 
-func (s *Bitwarden) Init(config map[string]interface{}) error {
-	if config == nil {
-		s.enabled = false
-		return nil
+func (s *Bitwarden) Init(raw json.RawMessage) error {
+	s.enabled = false
+	var bwConfig bitwardenConfig
+	if configured, err := decodeSourceConfig(raw, &bwConfig); err != nil || !configured {
+		return err
 	}
 
-	rawSecrets, ok := config["secrets"].(map[string]interface{})
-	if !ok || len(rawSecrets) == 0 {
-		s.enabled = false
+	if len(bwConfig.Secrets) == 0 {
 		return fmt.Errorf("bitwarden source requires a non-empty 'secrets' map")
 	}
 
 	var idEntries []bitwardenSecretConfig
 	keyEntries := make(map[string][]bitwardenSecretConfig)
 
-	for envVar, value := range rawSecrets {
-		switch v := value.(type) {
-		case string:
-			trimmed := strings.TrimSpace(v)
-			if trimmed == "" {
-				s.enabled = false
-				return fmt.Errorf("bitwarden secret id for %s cannot be empty", envVar)
-			}
-			idEntries = append(idEntries, bitwardenSecretConfig{envVar: envVar, id: trimmed})
-		case map[string]interface{}:
-			if idVal, ok := v["id"].(string); ok && strings.TrimSpace(idVal) != "" {
-				idEntries = append(idEntries, bitwardenSecretConfig{envVar: envVar, id: strings.TrimSpace(idVal)})
-				continue
-			}
-
-			keyVal, ok := v["key"].(string)
-			if !ok || strings.TrimSpace(keyVal) == "" {
-				s.enabled = false
-				return fmt.Errorf("bitwarden secret config for %s must include 'id' or non-empty 'key'", envVar)
-			}
-
-			projectID, _ := v["project_id"].(string)
-			projectID = strings.TrimSpace(projectID)
-			entry := bitwardenSecretConfig{envVar: envVar, key: strings.TrimSpace(keyVal), projectID: projectID}
-			keyEntries[projectID] = append(keyEntries[projectID], entry)
+	for envVar, ref := range bwConfig.Secrets {
+		id := strings.TrimSpace(ref.ID)
+		key := strings.TrimSpace(ref.Key)
+		switch {
+		case id != "":
+			idEntries = append(idEntries, bitwardenSecretConfig{envVar: envVar, id: id})
+		case ref.bare:
+			return fmt.Errorf("bitwarden secret id for %s cannot be empty", envVar)
+		case key == "":
+			return fmt.Errorf("bitwarden secret config for %s must include 'id' or non-empty 'key'", envVar)
 		default:
-			s.enabled = false
-			return fmt.Errorf("bitwarden secret config for %s must be a string or object", envVar)
+			projectID := strings.TrimSpace(ref.ProjectID)
+			entry := bitwardenSecretConfig{envVar: envVar, key: key, projectID: projectID}
+			keyEntries[projectID] = append(keyEntries[projectID], entry)
 		}
 	}
 
 	if _, err := lookupBinary("bws"); err != nil {
-		s.enabled = false
 		return fmt.Errorf("bitwarden CLI 'bws' not found: %w", err)
 	}
 

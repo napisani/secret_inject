@@ -1,6 +1,8 @@
 package source
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -8,16 +10,30 @@ import (
 	"github.com/napisani/secret_inject/internal/secret"
 )
 
-// Init receives just this source's own config sub-map (the value of
-// sources[<name>] in the top-level config), or nil if the source isn't
-// configured at all. Implementations should disable themselves on nil.
+// Init receives this source's own raw config (the value of sources[<name>] in
+// the top-level config), which is nil or JSON null when the source isn't
+// configured. Implementations disable themselves in that case and return an
+// error for a config of the wrong shape.
 type Source interface {
-	Init(config map[string]interface{}) error
+	Init(config json.RawMessage) error
 	GetAllSecrets(previous *secret.Secrets) (*secret.Secrets, error)
 	IsEnabled() bool
 }
 
 var sourceRegistry = map[string]func() Source{}
+
+// decodeSourceConfig decodes raw into dst. It reports false, with no error,
+// when the source is unconfigured (nil or JSON null).
+func decodeSourceConfig(raw json.RawMessage, dst any) (bool, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return false, nil
+	}
+	if err := json.Unmarshal(trimmed, dst); err != nil {
+		return false, fmt.Errorf("invalid config: %w", err)
+	}
+	return true, nil
+}
 
 func registerSource(name string, factory func() Source) {
 	if _, exists := sourceRegistry[name]; exists {
@@ -29,7 +45,7 @@ func registerSource(name string, factory func() Source) {
 // resolveSourceOrder orders sourcesConfig's keys by sequence, appending any
 // keys sequence omits (sorted) at the end. An empty sequence is equivalent to
 // omitting it: everything falls into the sorted "remaining" set.
-func resolveSourceOrder(sequence []string, sourcesConfig map[string]interface{}) ([]string, error) {
+func resolveSourceOrder(sequence []string, sourcesConfig map[string]json.RawMessage) ([]string, error) {
 	ordered := make([]string, 0, len(sourcesConfig))
 	seen := make(map[string]bool, len(sourcesConfig))
 	for _, name := range sequence {
@@ -59,7 +75,7 @@ func resolveSourceOrder(sequence []string, sourcesConfig map[string]interface{})
 
 // LoadAll instantiates and initializes every configured source, in the order
 // given by sequence (any sources sequence omits are appended, sorted).
-func LoadAll(sourcesConfig map[string]interface{}, sequence []string) ([]Source, error) {
+func LoadAll(sourcesConfig map[string]json.RawMessage, sequence []string) ([]Source, error) {
 	if len(sourcesConfig) == 0 {
 		return nil, nil
 	}
@@ -77,8 +93,7 @@ func LoadAll(sourcesConfig map[string]interface{}, sequence []string) ([]Source,
 		}
 
 		instance := factory()
-		sourceConfig, _ := sourcesConfig[key].(map[string]interface{})
-		if err := instance.Init(sourceConfig); err != nil {
+		if err := instance.Init(sourcesConfig[key]); err != nil {
 			return nil, fmt.Errorf("initializing source %s: %w", key, err)
 		}
 

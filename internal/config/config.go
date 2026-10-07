@@ -8,10 +8,20 @@ import (
 	"os"
 )
 
+// Config is the top-level config file. Each source decodes and validates its
+// own entry in Sources.
 type Config struct {
-	Sources        map[string]interface{} `json:"sources"`
-	Storage        map[string]interface{} `json:"storage"`
-	SourceSequence []string               `json:"source_sequence"`
+	Sources        map[string]json.RawMessage `json:"sources"`
+	Storage        *StorageConfig             `json:"storage"`
+	SourceSequence []string                   `json:"source_sequence"`
+}
+
+// StorageConfig selects where fetched secrets are cached. AllowedBackends and
+// Password apply only to the keyring type.
+type StorageConfig struct {
+	Type            string   `json:"type"`
+	AllowedBackends []string `json:"allowed_backends"`
+	Password        string   `json:"password"`
 }
 
 func ReadConfig(filename string) (*Config, error) {
@@ -31,7 +41,7 @@ func ReadConfig(filename string) (*Config, error) {
 		return nil, err
 	}
 
-	slog.Debug("Read config contents", "sources", len(config.Sources), "storage", len(config.Storage))
+	slog.Debug("Read config contents", "sources", len(config.Sources), "has_storage", config.Storage != nil)
 	return &config, nil
 }
 
@@ -61,12 +71,11 @@ func (c *Config) Validate() error {
 		return errors.New("storage configuration is required")
 	}
 
-	storageType, ok := c.Storage["type"].(string)
-	if !ok {
+	if c.Storage.Type == "" {
 		return errors.New("storage 'type' field is required and must be a string")
 	}
 
-	if storageType != "keyring" && storageType != "file" {
+	if c.Storage.Type != "keyring" && c.Storage.Type != "file" {
 		return errors.New("storage type must be 'keyring' or 'file'")
 	}
 

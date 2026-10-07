@@ -1,11 +1,16 @@
 package source
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/napisani/secret_inject/internal/secret"
 )
+
+type onePasswordConfig struct {
+	Secrets map[string]string `json:"secrets"`
+}
 
 type OnePassword struct {
 	secrets map[string]string
@@ -20,30 +25,27 @@ func NewOnePassword() *OnePassword {
 	return &OnePassword{}
 }
 
-func (s *OnePassword) Init(config map[string]interface{}) error {
-	if config == nil {
-		s.enabled = false
-		return nil
+func (s *OnePassword) Init(raw json.RawMessage) error {
+	s.enabled = false
+	var opConfig onePasswordConfig
+	if configured, err := decodeSourceConfig(raw, &opConfig); err != nil || !configured {
+		return err
 	}
 
-	rawSecrets, ok := config["secrets"].(map[string]interface{})
-	if !ok || len(rawSecrets) == 0 {
-		s.enabled = false
+	if len(opConfig.Secrets) == 0 {
 		return fmt.Errorf("onepassword source requires a non-empty 'secrets' map")
 	}
 
-	secrets := make(map[string]string, len(rawSecrets))
-	for envVar, value := range rawSecrets {
-		ref, ok := value.(string)
-		if !ok || strings.TrimSpace(ref) == "" {
-			s.enabled = false
+	secrets := make(map[string]string, len(opConfig.Secrets))
+	for envVar, ref := range opConfig.Secrets {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
 			return fmt.Errorf("onepassword secret reference for %s must be a non-empty string", envVar)
 		}
-		secrets[envVar] = strings.TrimSpace(ref)
+		secrets[envVar] = ref
 	}
 
 	if _, err := lookupBinary("op"); err != nil {
-		s.enabled = false
 		return fmt.Errorf("1password CLI 'op' not found: %w", err)
 	}
 

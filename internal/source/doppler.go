@@ -28,35 +28,26 @@ func NewDoppler() *Doppler {
 	}
 }
 
-func (s *Doppler) Init(config map[string]interface{}) error {
-	if config == nil {
-		s.enabled = false
-		return nil
+func (s *Doppler) Init(raw json.RawMessage) error {
+	s.enabled = false
+	var dopplerConfig DopplerConfig
+	if configured, err := decodeSourceConfig(raw, &dopplerConfig); err != nil || !configured {
+		return err
 	}
 
-	s.enabled = true
-	dopplerConfig := DopplerConfig{}
-
-	project, ok := config["project"].(string)
-	if !ok || project == "" {
-		s.enabled = false
+	if dopplerConfig.Project == "" {
 		return fmt.Errorf("doppler source requires 'project' field")
 	}
-	dopplerConfig.Project = project
-
-	env, ok := config["env"].(string)
-	if !ok || env == "" {
-		s.enabled = false
+	if dopplerConfig.Env == "" {
 		return fmt.Errorf("doppler source requires 'env' field")
 	}
-	dopplerConfig.Env = env
 
 	if _, err := lookupBinary("doppler"); err != nil {
-		s.enabled = false
 		return fmt.Errorf("doppler CLI not found: %w", err)
 	}
 
 	s.config = &dopplerConfig
+	s.enabled = true
 	return nil
 }
 

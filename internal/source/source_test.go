@@ -1,8 +1,10 @@
 package source
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/napisani/secret_inject/internal/secret"
@@ -23,6 +25,21 @@ func withPatchedGlobals(run func(string, []string, ...string) ([]byte, error), l
 	}
 }
 
+// rawSources marshals each source's config the way ReadConfig would hand it
+// to LoadAll.
+func rawSources(t *testing.T, cfg map[string]interface{}) map[string]json.RawMessage {
+	t.Helper()
+	raw := make(map[string]json.RawMessage, len(cfg))
+	for name, value := range cfg {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatalf("marshal %s config: %v", name, err)
+		}
+		raw[name] = encoded
+	}
+	return raw
+}
+
 func hasEnvVar(env []string, key string, value string) bool {
 	target := fmt.Sprintf("%s=%s", key, value)
 	for _, entry := range env {
@@ -38,7 +55,7 @@ func TestLoadAllReturnsErrorForUnknownSource(t *testing.T) {
 		"unknown": map[string]interface{}{},
 	}
 
-	if _, err := LoadAll(cfg, nil); err == nil {
+	if _, err := LoadAll(rawSources(t, cfg), nil); err == nil {
 		t.Fatalf("expected error for unknown source")
 	}
 }
@@ -67,7 +84,7 @@ func TestLoadAllRespectsSequence(t *testing.T) {
 	})
 	defer cleanup()
 
-	sources, err := LoadAll(cfg, sequence)
+	sources, err := LoadAll(rawSources(t, cfg), sequence)
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}
@@ -121,7 +138,7 @@ func TestOnePasswordSourceFetchesSecrets(t *testing.T) {
 	})
 	defer cleanup()
 
-	sources, err := LoadAll(cfg, nil)
+	sources, err := LoadAll(rawSources(t, cfg), nil)
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}
@@ -173,7 +190,7 @@ func TestOnePasswordInitMissingCLI(t *testing.T) {
 	})
 	defer cleanup()
 
-	if _, err := LoadAll(cfg, nil); err == nil {
+	if _, err := LoadAll(rawSources(t, cfg), nil); err == nil {
 		t.Fatalf("expected error when op CLI missing")
 	}
 }
@@ -213,7 +230,7 @@ func TestBitwardenSourceFetchesByIDAndKey(t *testing.T) {
 	})
 	defer cleanup()
 
-	sources, err := LoadAll(cfg, nil)
+	sources, err := LoadAll(rawSources(t, cfg), nil)
 	if err != nil {
 		t.Fatalf("LoadAll failed: %v", err)
 	}
@@ -271,7 +288,7 @@ func TestBitwardenInitValidations(t *testing.T) {
 	}
 
 	for _, cfg := range cases {
-		if _, err := LoadAll(cfg, nil); err == nil {
+		if _, err := LoadAll(rawSources(t, cfg), nil); err == nil {
 			t.Fatalf("expected validation error for cfg %v", cfg)
 		}
 	}
@@ -280,7 +297,7 @@ func TestBitwardenInitValidations(t *testing.T) {
 func TestSourcesDisableWhenLookupFails(t *testing.T) {
 	cfg := map[string]interface{}{}
 
-	sources, err := LoadAll(cfg, nil)
+	sources, err := LoadAll(rawSources(t, cfg), nil)
 	if err != nil {
 		t.Fatalf("LoadAll unexpected error: %v", err)
 	}
@@ -309,5 +326,57 @@ func TestSourcesDisableWhenLookupFails(t *testing.T) {
 
 	if op.IsEnabled() {
 		t.Fatalf("expected onepassword to be disabled when no config")
+	}
+}
+
+func TestLoadAllRejectsMalformedSourceEntries(t *testing.T) {
+	cleanup := withPatchedGlobals(nil, func(string) (string, error) { return "/usr/bin/mock", nil })
+	defer cleanup()
+
+	cases := map[string]string{
+		"non-object source":     `{"doppler": "proj"}`,
+		"boolean source":        `{"onepassword": true}`,
+		"wrong field type":      `{"doppler": {"project": 5, "env": "dev"}}`,
+		"non-string reference":  `{"onepassword": {"secrets": {"API_KEY": 7}}}`,
+		"non-object bitwarden":  `{"bitwarden": {"secrets": {"DB": 7}}}`,
+		"empty bitwarden id":    `{"bitwarden": {"secrets": {"DB": " "}}}`,
+		"bitwarden without key": `{"bitwarden": {"secrets": {"DB": {"project_id": "p"}}}}`,
+	}
+	for name, doc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var cfg map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(doc), &cfg); err != nil {
+				t.Fatalf("bad test document: %v", err)
+			}
+			if _, err := LoadAll(cfg, nil); err == nil {
+				t.Fatalf("expected an error for %s", doc)
+			}
+		})
+	}
+}
+
+func TestLoadAllSkipsNullSourceEntries(t *testing.T) {
+	var cfg map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(`{"doppler": null}`), &cfg); err != nil {
+		t.Fatalf("bad test document: %v", err)
+	}
+
+	sources, err := LoadAll(cfg, nil)
+	if err != nil {
+		t.Fatalf("LoadAll unexpected error: %v", err)
+	}
+	if len(sources) != 0 {
+		t.Fatalf("expected a null source to stay disabled, got %d sources", len(sources))
+	}
+}
+
+func TestBitwardenEmptyBareIDNamesTheVariable(t *testing.T) {
+	cleanup := withPatchedGlobals(nil, func(string) (string, error) { return "/usr/bin/bws", nil })
+	defer cleanup()
+
+	bw := NewBitwarden()
+	err := bw.Init(json.RawMessage(`{"secrets": {"DB_PASSWORD": ""}}`))
+	if err == nil || !strings.Contains(err.Error(), "bitwarden secret id for DB_PASSWORD cannot be empty") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

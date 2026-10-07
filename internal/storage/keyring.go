@@ -1,12 +1,12 @@
 package storage
 
 import (
-	"fmt"
 	"log/slog"
 	"os"
 	"path"
 
 	keyring "github.com/99designs/keyring"
+	"github.com/napisani/secret_inject/internal/config"
 	"github.com/napisani/secret_inject/internal/secret"
 )
 
@@ -16,21 +16,15 @@ type Keyring struct {
 	keyring keyring.Keyring
 }
 
-func NewKeyring(storageConfig map[string]interface{}) (*Keyring, error) {
+func NewKeyring(storageConfig *config.StorageConfig) (*Keyring, error) {
 	name := "secret_inject"
 
 	allowedBackends := []keyring.BackendType{}
-	allowedBackendsRaw, ok := storageConfig["allowed_backends"].([]interface{})
-	if !ok || len(allowedBackendsRaw) == 0 {
-		allowedBackendsRaw = nil
-	} else {
-		availableBackends := keyring.AvailableBackends()
-		for _, backend := range allowedBackendsRaw {
-			str := fmt.Sprintf("%v", backend)
-			for _, availableBackend := range availableBackends {
-				if str == string(availableBackend) {
-					allowedBackends = append(allowedBackends, availableBackend)
-				}
+	availableBackends := keyring.AvailableBackends()
+	for _, backend := range storageConfig.AllowedBackends {
+		for _, availableBackend := range availableBackends {
+			if backend == string(availableBackend) {
+				allowedBackends = append(allowedBackends, availableBackend)
 			}
 		}
 	}
@@ -40,14 +34,11 @@ func NewKeyring(storageConfig map[string]interface{}) (*Keyring, error) {
 	tmpDir := os.TempDir()
 	filePath := path.Join(tmpDir, ".keyring.jwt")
 
-	masterPassword, ok := storageConfig["password"]
-	if !ok {
-		masterPassword = ""
-	}
+	masterPassword := storageConfig.Password
 
 	getPassword := func(prompt string) (string, error) {
 		if masterPassword != "" {
-			return fmt.Sprintf("%v", masterPassword), nil
+			return masterPassword, nil
 		}
 		return getPasswordStdin(prompt)
 	}

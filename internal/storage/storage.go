@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 
+	"github.com/napisani/secret_inject/internal/config"
 	"github.com/napisani/secret_inject/internal/secret"
 )
 
@@ -14,17 +15,12 @@ type Storage interface {
 	CleanCachedSecrets() error
 }
 
-func Get(storageConfig map[string]interface{}) (Storage, error) {
+func Get(storageConfig *config.StorageConfig) (Storage, error) {
 	if storageConfig == nil {
 		return nil, errors.New("no storage configuration found in config file")
 	}
 
-	storageType, ok := storageConfig["type"].(string)
-	if !ok {
-		return nil, errors.New("storage 'type' field is required and must be a string")
-	}
-
-	switch storageType {
+	switch storageConfig.Type {
 	case "keyring":
 		slog.Debug("Using keyring storage")
 		return NewKeyring(storageConfig)
