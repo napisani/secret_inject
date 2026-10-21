@@ -42,10 +42,10 @@ func registerSource(name string, factory func() Source) {
 	sourceRegistry[name] = factory
 }
 
-// resolveSourceOrder orders sourcesConfig's keys by sequence, appending any
+// ResolveSourceOrder orders sourcesConfig's keys by sequence, appending any
 // keys sequence omits (sorted) at the end. An empty sequence is equivalent to
 // omitting it: everything falls into the sorted "remaining" set.
-func resolveSourceOrder(sequence []string, sourcesConfig map[string]json.RawMessage) ([]string, error) {
+func ResolveSourceOrder(sequence []string, sourcesConfig map[string]json.RawMessage) ([]string, error) {
 	ordered := make([]string, 0, len(sourcesConfig))
 	seen := make(map[string]bool, len(sourcesConfig))
 	for _, name := range sequence {
@@ -80,7 +80,7 @@ func LoadAll(sourcesConfig map[string]json.RawMessage, sequence []string) ([]Sou
 		return nil, nil
 	}
 
-	keys, err := resolveSourceOrder(sequence, sourcesConfig)
+	keys, err := ResolveSourceOrder(sequence, sourcesConfig)
 	if err != nil {
 		return nil, err
 	}

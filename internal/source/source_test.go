@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -27,7 +28,7 @@ func withPatchedGlobals(run func(string, []string, ...string) ([]byte, error), l
 
 // rawSources marshals each source's config the way ReadConfig would hand it
 // to LoadAll.
-func rawSources(t *testing.T, cfg map[string]interface{}) map[string]json.RawMessage {
+func rawSources(t *testing.T, cfg map[string]any) map[string]json.RawMessage {
 	t.Helper()
 	raw := make(map[string]json.RawMessage, len(cfg))
 	for name, value := range cfg {
@@ -42,17 +43,12 @@ func rawSources(t *testing.T, cfg map[string]interface{}) map[string]json.RawMes
 
 func hasEnvVar(env []string, key string, value string) bool {
 	target := fmt.Sprintf("%s=%s", key, value)
-	for _, entry := range env {
-		if entry == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(env, target)
 }
 
 func TestLoadAllReturnsErrorForUnknownSource(t *testing.T) {
-	cfg := map[string]interface{}{
-		"unknown": map[string]interface{}{},
+	cfg := map[string]any{
+		"unknown": map[string]any{},
 	}
 
 	if _, err := LoadAll(rawSources(t, cfg), nil); err == nil {
@@ -62,18 +58,18 @@ func TestLoadAllReturnsErrorForUnknownSource(t *testing.T) {
 
 func TestLoadAllRespectsSequence(t *testing.T) {
 	sequence := []string{"onepassword", "doppler"}
-	cfg := map[string]interface{}{
-		"doppler": map[string]interface{}{
+	cfg := map[string]any{
+		"doppler": map[string]any{
 			"project": "proj",
 			"env":     "dev",
 		},
-		"onepassword": map[string]interface{}{
-			"secrets": map[string]interface{}{
+		"onepassword": map[string]any{
+			"secrets": map[string]any{
 				"API_KEY": "op://vault/item/password",
 			},
 		},
-		"bitwarden": map[string]interface{}{
-			"secrets": map[string]interface{}{
+		"bitwarden": map[string]any{
+			"secrets": map[string]any{
 				"DB_PASSWORD": "123",
 			},
 		},
@@ -105,9 +101,9 @@ func TestLoadAllRespectsSequence(t *testing.T) {
 }
 
 func TestOnePasswordSourceFetchesSecrets(t *testing.T) {
-	cfg := map[string]interface{}{
-		"onepassword": map[string]interface{}{
-			"secrets": map[string]interface{}{
+	cfg := map[string]any{
+		"onepassword": map[string]any{
+			"secrets": map[string]any{
 				"API_KEY":  "op://vault/item/password",
 				"USERNAME": "op://vault/item/username",
 			},
@@ -177,9 +173,9 @@ func TestOnePasswordSourceFetchesSecrets(t *testing.T) {
 }
 
 func TestOnePasswordInitMissingCLI(t *testing.T) {
-	cfg := map[string]interface{}{
-		"onepassword": map[string]interface{}{
-			"secrets": map[string]interface{}{
+	cfg := map[string]any{
+		"onepassword": map[string]any{
+			"secrets": map[string]any{
 				"API_KEY": "op://vault/item/password",
 			},
 		},
@@ -196,11 +192,11 @@ func TestOnePasswordInitMissingCLI(t *testing.T) {
 }
 
 func TestBitwardenSourceFetchesByIDAndKey(t *testing.T) {
-	cfg := map[string]interface{}{
-		"bitwarden": map[string]interface{}{
-			"secrets": map[string]interface{}{
+	cfg := map[string]any{
+		"bitwarden": map[string]any{
+			"secrets": map[string]any{
 				"DB_PASSWORD": "123",
-				"API_TOKEN": map[string]interface{}{
+				"API_TOKEN": map[string]any{
 					"key":        "api-token",
 					"project_id": "proj-1",
 				},
@@ -272,16 +268,16 @@ func TestBitwardenInitValidations(t *testing.T) {
 	cleanup := withPatchedGlobals(nil, func(string) (string, error) { return "/usr/bin/bws", nil })
 	defer cleanup()
 
-	cases := []map[string]interface{}{
+	cases := []map[string]any{
 		{
-			"bitwarden": map[string]interface{}{
-				"secrets": map[string]interface{}{},
+			"bitwarden": map[string]any{
+				"secrets": map[string]any{},
 			},
 		},
 		{
-			"bitwarden": map[string]interface{}{
-				"secrets": map[string]interface{}{
-					"MISSING": map[string]interface{}{},
+			"bitwarden": map[string]any{
+				"secrets": map[string]any{
+					"MISSING": map[string]any{},
 				},
 			},
 		},
@@ -295,7 +291,7 @@ func TestBitwardenInitValidations(t *testing.T) {
 }
 
 func TestSourcesDisableWhenLookupFails(t *testing.T) {
-	cfg := map[string]interface{}{}
+	cfg := map[string]any{}
 
 	sources, err := LoadAll(rawSources(t, cfg), nil)
 	if err != nil {

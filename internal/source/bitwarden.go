@@ -108,14 +108,20 @@ func (s *Bitwarden) GetAllSecrets(previous *secret.Secrets) (*secret.Secrets, er
 	env := buildCommandEnv(previous)
 
 	for _, entry := range s.byID {
-		output, err := runCLICommand("bws", env, "secret", "get", entry.id)
+		output, err := runCLICommand(
+			"bws",
+			env,
+			"secret",
+			"get",
+			entry.id,
+		)
 		if err != nil {
 			return nil, err
 		}
 
 		var payload bitwardenSecret
 		if err := json.Unmarshal(output, &payload); err != nil {
-			return nil, fmt.Errorf("failed to parse bitwarden secret %s: %w", entry.id, err)
+			return nil, &ProviderError{Provider: "bitwarden", Operation: "get", Kind: "parse", ExitCode: -1}
 		}
 
 		results.Entries[entry.envVar] = strings.TrimSpace(payload.Value)
@@ -134,7 +140,7 @@ func (s *Bitwarden) GetAllSecrets(previous *secret.Secrets) (*secret.Secrets, er
 
 		var payload []bitwardenSecret
 		if err := json.Unmarshal(output, &payload); err != nil {
-			return nil, fmt.Errorf("failed to parse bitwarden secret list: %w", err)
+			return nil, &ProviderError{Provider: "bitwarden", Operation: "list", Kind: "parse", ExitCode: -1}
 		}
 
 		secretsByKey := make(map[string]string, len(payload))
@@ -145,7 +151,7 @@ func (s *Bitwarden) GetAllSecrets(previous *secret.Secrets) (*secret.Secrets, er
 		for _, entry := range entries {
 			value, ok := secretsByKey[entry.key]
 			if !ok {
-				return nil, fmt.Errorf("bitwarden secret with key %s not found", entry.key)
+				return nil, &ProviderError{Provider: "bitwarden", Operation: "list", Kind: "missing-secret", ExitCode: -1}
 			}
 			results.Entries[entry.envVar] = strings.TrimSpace(value)
 		}

@@ -1,11 +1,13 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"log/slog"
 	"os"
+	"strings"
+
+	"github.com/napisani/secret_inject/internal/profile"
 )
 
 // Config is the top-level config file. Each source decodes and validates its
@@ -14,6 +16,7 @@ type Config struct {
 	Sources        map[string]json.RawMessage `json:"sources"`
 	Storage        *StorageConfig             `json:"storage"`
 	SourceSequence []string                   `json:"source_sequence"`
+	Profiles       profile.Profiles           `json:"profiles"`
 }
 
 // StorageConfig selects where fetched secrets are cached. AllowedBackends and
@@ -24,12 +27,42 @@ type StorageConfig struct {
 	Password        string   `json:"password"`
 }
 
+func (c *Config) UnmarshalJSON(data []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	first, err := decoder.Token()
+	if err != nil || first != json.Delim('{') {
+		return errors.New("configuration must be an object")
+	}
+	profilesSeen := false
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		if name, ok := token.(string); ok && strings.EqualFold(name, "profiles") {
+			if name != "profiles" {
+				return errors.New("profiles field must use lowercase spelling")
+			}
+			if profilesSeen {
+				return errors.New("duplicate profiles block")
+			}
+			profilesSeen = true
+		}
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			return err
+		}
+	}
+	type wire Config
+	var parsed wire
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	*c = Config(parsed)
+	return nil
+}
+
 func ReadConfig(filename string) (*Config, error) {
-	slog.Debug("Reading config file", "filename", filename)
-
-	// Check file permissions first
-	checkConfigPermissions(filename)
-
 	content, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
@@ -41,29 +74,7 @@ func ReadConfig(filename string) (*Config, error) {
 		return nil, err
 	}
 
-	slog.Debug("Read config contents", "sources", len(config.Sources), "has_storage", config.Storage != nil)
 	return &config, nil
-}
-
-// checkConfigPermissions warns if config file has insecure permissions (debug mode only)
-func checkConfigPermissions(filename string) {
-	fileInfo, err := os.Stat(filename)
-	if err != nil {
-		// File doesn't exist or can't be read, will be handled by ReadFile
-		return
-	}
-
-	mode := fileInfo.Mode()
-	perm := mode.Perm()
-
-	// Check if group or others have any permissions (read, write, or execute)
-	if perm&0077 != 0 {
-		slog.Debug("Config file has insecure permissions",
-			"file", filename,
-			"current", fmt.Sprintf("%04o", perm),
-			"recommended", "0600",
-			"note", "Config may contain sensitive data - consider running: chmod 600 "+filename)
-	}
 }
 
 func (c *Config) Validate() error {

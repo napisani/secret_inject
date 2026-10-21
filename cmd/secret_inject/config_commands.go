@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,7 +41,7 @@ const configTemplate = `{
 }
 `
 
-func runConfigCommand(args []string) error {
+func runConfigCommand(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("usage: secret_inject config <init|edit> [flags]")
 	}
@@ -48,50 +49,53 @@ func runConfigCommand(args []string) error {
 	switch args[0] {
 	case "init":
 		fs := flag.NewFlagSet("config init", flag.ContinueOnError)
-		discard := strings.Builder{}
-		fs.SetOutput(&discard)
+		var help strings.Builder
+		fs.SetOutput(&help)
 		configPath := fs.String("config", defaultFile, "Config file path")
 		force := fs.Bool("force", false, "Overwrite existing config file")
 		if err := fs.Parse(args[1:]); err != nil {
-			if err == flag.ErrHelp {
-				return nil
+			if errors.Is(err, flag.ErrHelp) {
+				return writeOutput(stderr, []byte(help.String()))
 			}
 			return err
+		}
+		if fs.NArg() != 0 {
+			return errors.New("config init does not accept positional arguments")
 		}
 		if err := initConfigFile(*configPath, *force); err != nil {
 			return err
 		}
-		fmt.Printf("Config written to %s\n", *configPath)
-		return nil
+		message := fmt.Sprintf("Config written to %s\n", *configPath)
+		return writeOutput(stdout, []byte(message))
 	case "edit":
 		fs := flag.NewFlagSet("config edit", flag.ContinueOnError)
-		discard := strings.Builder{}
-		fs.SetOutput(&discard)
+		var help strings.Builder
+		fs.SetOutput(&help)
 		configPath := fs.String("config", defaultFile, "Config file path")
 		editorFlag := fs.String("editor", "", "Editor override (defaults to $EDITOR or vi)")
 		if err := fs.Parse(args[1:]); err != nil {
-			if err == flag.ErrHelp {
-				return nil
+			if errors.Is(err, flag.ErrHelp) {
+				return writeOutput(stderr, []byte(help.String()))
 			}
 			return err
 		}
-		return editConfigFile(*configPath, *editorFlag)
+		if fs.NArg() != 0 {
+			return errors.New("config edit does not accept positional arguments")
+		}
+		return editConfigFile(
+			*configPath,
+			*editorFlag,
+			stdout,
+			stderr,
+		)
 	default:
 		return fmt.Errorf("unknown config subcommand %q", args[0])
 	}
 }
 
-func initConfigFile(path string, force bool) error {
+func initConfigFile(path string, force bool) (err error) {
 	if path == "" {
 		return errors.New("config path cannot be empty")
-	}
-
-	if !force {
-		if _, err := os.Stat(path); err == nil {
-			return fmt.Errorf("config file %s already exists (use --force to overwrite)", path)
-		} else if !os.IsNotExist(err) {
-			return err
-		}
 	}
 
 	dir := filepath.Dir(path)
@@ -99,14 +103,34 @@ func initConfigFile(path string, force bool) error {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 
-	if err := os.WriteFile(path, []byte(configTemplate), 0o600); err != nil {
+	flags := os.O_CREATE | os.O_WRONLY
+	if !force {
+		flags |= os.O_EXCL
+	}
+	file, err := os.OpenFile(path, flags, 0o600)
+	if errors.Is(err, os.ErrExist) && !force {
+		return fmt.Errorf("config file %s already exists (use --force to overwrite)", path)
+	}
+	if err != nil {
+		return fmt.Errorf("opening config template: %w", err)
+	}
+	defer func() { err = errors.Join(err, file.Close()) }()
+	if err := file.Chmod(0o600); err != nil {
+		return fmt.Errorf("restricting config permissions: %w", err)
+	}
+	if err := file.Truncate(0); err != nil {
+		return fmt.Errorf("truncating config template: %w", err)
+	}
+	if _, err := file.Write([]byte(configTemplate)); err != nil {
 		return fmt.Errorf("writing config template: %w", err)
 	}
-
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("syncing config template: %w", err)
+	}
 	return nil
 }
 
-func editConfigFile(path string, overrideEditor string) error {
+func editConfigFile(path, overrideEditor string, stdout, stderr io.Writer) error {
 	if path == "" {
 		return errors.New("config path cannot be empty")
 	}
@@ -133,7 +157,12 @@ func editConfigFile(path string, overrideEditor string) error {
 		return errors.New("editor command is empty")
 	}
 
-	return editorLauncher(parts[0], parts[1:], path)
+	return editorLauncher(
+		parts[0],
+		append(parts[1:], path),
+		stdout,
+		stderr,
+	)
 }
 
 func splitCommandLine(input string) ([]string, error) {
@@ -188,11 +217,11 @@ func splitCommandLine(input string) ([]string, error) {
 
 var editorLauncher = defaultEditorLauncher
 
-func defaultEditorLauncher(command string, args []string, path string) error {
-	cmd := exec.Command(command, append(args, path)...)
+func defaultEditorLauncher(command string, args []string, stdout, stderr io.Writer) error {
+	cmd := exec.Command(command, args...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	return cmd.Run()
 }
 

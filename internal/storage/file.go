@@ -1,123 +1,104 @@
 package storage
 
 import (
-	"fmt"
-	"log/slog"
+	"errors"
 	"os"
-	"path"
+	"path/filepath"
+	"strings"
 
+	"github.com/napisani/secret_inject/internal/privatefs"
 	"github.com/napisani/secret_inject/internal/secret"
 )
 
-const fileName = ".secret_inject.cache"
-
-var tmpDir = os.TempDir()
-var fullFilePath = path.Join(tmpDir, fileName)
-
-type File struct{}
-
-func NewFile() *File {
-	// Security warning only in debug mode to avoid polluting output
-	slog.Debug("Using file storage - secrets stored in PLAINTEXT",
-		"location", fullFilePath,
-		"warning", "Not secure for production use - consider using keyring storage")
-	return &File{}
+type File struct {
+	directory  string
+	legacyPath string
 }
 
-func (s *File) HasCachedSecrets() bool {
-	_, err := os.Stat(fullFilePath)
-	return !os.IsNotExist(err)
-}
-
-func (s *File) GetCachedSecrets() (*secret.Secrets, error) {
-	slog.Debug("Reading cached secrets", "path", fullFilePath)
-
-	fileInfo, err := os.Stat(fullFilePath)
-	if os.IsNotExist(err) || fileInfo.Size() == 0 {
-		return nil, err
-	}
-
-	// Check file permissions
-	mode := fileInfo.Mode()
-	if mode.Perm() != 0600 {
-		slog.Debug("Cache file has insecure permissions",
-			"path", fullFilePath,
-			"current", fmt.Sprintf("%04o", mode.Perm()),
-			"recommended", "0600")
-	}
-
-	content, err := os.ReadFile(fullFilePath)
+func NewFile() (*File, error) {
+	root, err := os.UserCacheDir()
 	if err != nil {
 		return nil, err
 	}
-	slog.Debug("Read cached secrets", "bytes", len(content))
-
-	return secret.Deserialize(content)
+	return &File{
+		directory:  filepath.Join(root, "secret_inject"),
+		legacyPath: filepath.Join(os.TempDir(), ".secret_inject.cache"),
+	}, nil
 }
 
-func (s *File) CacheSecrets(secrets *secret.Secrets) error {
-	err := mkdirRecursive(tmpDir)
-	if err != nil {
+func (s *File) Initialize() error {
+	if err := privatefs.EnsureDir(s.directory); err != nil {
 		return err
 	}
-
-	file, err := createFileIfNotExist(fullFilePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	// Ensure file has secure permissions (owner read/write only)
-	err = file.Chmod(0600)
-	if err != nil {
-		slog.Debug("Failed to set secure file permissions", "error", err)
-	}
-
-	slog.Debug("Caching secrets", "path", fullFilePath, "count", len(secrets.Entries))
-	serializedSecrets, err := secrets.Serialize()
-	if err != nil {
-		return err
-	}
-
-	_, err = file.Write(serializedSecrets)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (s *File) CleanCachedSecrets() error {
-	err := os.Remove(fullFilePath)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	slog.Debug("Removed cached secrets", "path", fullFilePath)
-	return nil
-}
-
-// Helper functions
-func mkdirRecursive(path string) error {
-	slog.Debug("Creating directory (if does not exist)", "path", path)
-	err := os.MkdirAll(path, 0755)
-	if err != nil {
-		return err
-	}
-	slog.Debug("Created directory", "path", path)
-	return nil
-}
-
-func createFileIfNotExist(filename string) (*os.File, error) {
-	_, err := os.Stat(filename)
-	if os.IsNotExist(err) {
-		slog.Debug("Creating file", "filename", filename)
-		file, err := os.Create(filename)
-		if err != nil {
-			return file, err
+	marker, err := privatefs.ReadFile(filepath.Join(s.directory, migrationMarker))
+	if err == nil {
+		if string(marker) != markerContent {
+			return errors.New("invalid cache migration marker")
 		}
-		return file, nil
+		return nil
 	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if info, err := os.Lstat(s.legacyPath); err == nil && info.IsDir() {
+		return errors.New("legacy cache path is a directory")
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.Remove(s.legacyPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return privatefs.WriteAtomic(s.directory, migrationMarker, []byte(markerContent))
+}
 
-	slog.Debug("Opening file", "filename", filename)
-	return os.OpenFile(filename, os.O_RDWR|os.O_TRUNC, 0600)
+func (s *File) Read(scope string) (*secret.Secrets, bool, error) {
+	key, err := cacheKey(scope)
+	if err != nil {
+		return nil, false, err
+	}
+	data, err := privatefs.ReadFile(filepath.Join(s.directory, key+".json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	snapshot, err := decodeSnapshot(data)
+	return snapshot, err == nil, err
+}
+
+func (s *File) Write(scope string, snapshot *secret.Secrets) error {
+	key, err := cacheKey(scope)
+	if err != nil {
+		return err
+	}
+	data, err := snapshot.Serialize()
+	if err != nil {
+		return err
+	}
+	if _, err := decodeSnapshot(data); err != nil {
+		return err
+	}
+	return privatefs.WriteAtomic(s.directory, key+".json", data)
+}
+
+func (s *File) CleanAll() error {
+	entries, err := os.ReadDir(s.directory)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		scope := strings.TrimSuffix(strings.TrimPrefix(name, cachePrefix), ".json")
+		if name != cachePrefix+scope+".json" || !scopePattern.MatchString(scope) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(s.directory, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
 }

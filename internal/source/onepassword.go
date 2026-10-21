@@ -58,7 +58,12 @@ func (s *OnePassword) GetAllSecrets(previous *secret.Secrets) (*secret.Secrets, 
 	results := secret.New()
 	env := buildCommandEnv(previous)
 	for envVar, ref := range s.secrets {
-		output, err := runCLICommand("op", env, "read", ref)
+		output, err := runCLICommand(
+			"op",
+			env,
+			"read",
+			ref,
+		)
 		if err != nil {
 			return nil, err
 		}

@@ -53,26 +53,35 @@ func (s *Doppler) Init(raw json.RawMessage) error {
 
 func (s *Doppler) GetAllSecrets(previous *secret.Secrets) (*secret.Secrets, error) {
 	env := buildCommandEnv(previous)
-	output, err := runCLICommand("doppler", env, "--project", s.config.Project, "--json", "secrets", "--config", s.config.Env)
+	output, err := runCLICommand(
+		"doppler",
+		env,
+		"--project",
+		s.config.Project,
+		"--json",
+		"secrets",
+		"--config",
+		s.config.Env,
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	var dopplerOutput map[string]interface{}
+	var dopplerOutput map[string]any
 	if err := json.Unmarshal(output, &dopplerOutput); err != nil {
-		return nil, err
+		return nil, &ProviderError{Provider: "doppler", Operation: "fetch", Kind: "parse", ExitCode: -1}
 	}
 
 	secrets := secret.New()
 	for key, value := range dopplerOutput {
-		entry, ok := value.(map[string]interface{})
+		entry, ok := value.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("unexpected doppler secret format for %s", key)
+			return nil, &ProviderError{Provider: "doppler", Operation: "fetch", Kind: "parse", ExitCode: -1}
 		}
 
 		computed, ok := entry["computed"].(string)
 		if !ok {
-			return nil, fmt.Errorf("doppler secret missing computed field for %s", key)
+			return nil, &ProviderError{Provider: "doppler", Operation: "fetch", Kind: "parse", ExitCode: -1}
 		}
 
 		secrets.Entries[key] = strings.TrimSpace(computed)

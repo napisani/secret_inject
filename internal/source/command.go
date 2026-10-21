@@ -2,11 +2,11 @@ package source
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/napisani/secret_inject/internal/secret"
@@ -24,11 +24,76 @@ func defaultRunCLICommand(name string, env []string, args ...string) ([]byte, er
 
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = env
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("%s %s: %w\n%s", name, strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+		// exec.ExitError retains raw provider stderr, which may contain secrets.
+		// Only classified metadata may enter the returned error chain.
+		provider, operation := commandOperation(name, args)
+		failure := &ProviderError{Provider: provider, Operation: operation, Kind: "start", ExitCode: -1}
+		var exit *exec.ExitError
+		if ctx.Err() != nil {
+			failure.Kind = "timeout"
+		} else if errors.As(err, &exit) {
+			failure.Kind = "exit"
+			failure.ExitCode = exit.ExitCode()
+		}
+		return nil, failure
 	}
 	return output, nil
+}
+
+type ProviderError struct {
+	Provider  string
+	Operation string
+	Kind      string
+	ExitCode  int
+}
+
+func (e *ProviderError) Error() string {
+	if e.Kind == "exit" {
+		return fmt.Sprintf(
+			"provider=%s operation=%s failure=%s exit=%d",
+			e.Provider,
+			e.Operation,
+			e.Kind,
+			e.ExitCode,
+		)
+	}
+	return fmt.Sprintf(
+		"provider=%s operation=%s failure=%s",
+		e.Provider,
+		e.Operation,
+		e.Kind,
+	)
+}
+
+func commandOperation(name string, args []string) (string, string) {
+	switch name {
+	case "doppler":
+		return "doppler", "fetch"
+	case "op":
+		return "onepassword", "read"
+	case "bws":
+		if len(args) > 1 && args[1] == "get" {
+			return "bitwarden", "get"
+		}
+		return "bitwarden", "list"
+	default:
+		return "provider", "fetch"
+	}
+}
+
+func Name(src Source) string {
+	switch src.(type) {
+	case *Doppler:
+		return "doppler"
+	case *OnePassword:
+		return "onepassword"
+	case *Bitwarden:
+		return "bitwarden"
+	default:
+		return "provider"
+	}
 }
 
 func buildCommandEnv(previous *secret.Secrets) []string {

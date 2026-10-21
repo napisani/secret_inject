@@ -7,6 +7,38 @@ import (
 	"testing"
 )
 
+func TestReadConfigRejectsDuplicateProfilesBlocks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	for _, doc := range []string{
+		`{"storage":{"type":"file"},"profiles":{"shell":{"exclude":[]}},"profiles":{}}`,
+		`{"storage":{"type":"file"},"profiles":{"shell":{"exclude":[]}},"Profiles":{}}`,
+		`{"storage":{"type":"file"},"PROFILES":{}}`,
+	} {
+		if err := os.WriteFile(path, []byte(doc), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReadConfig(path); err == nil {
+			t.Fatal("duplicate or mis-cased profiles block bypassed validation")
+		}
+	}
+}
+
+func TestReadConfigProfiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"storage":{"type":"file"},"profiles":{"shell":{"exclude":[],"overwrite":false}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ReadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "shell"
+	p, err := cfg.Profiles.Choose(&name)
+	if err != nil || p.Overwrite() {
+		t.Fatalf("profile decode: %v", err)
+	}
+}
+
 func TestReadConfig(t *testing.T) {
 	// Create a temporary config file
 	content := `{

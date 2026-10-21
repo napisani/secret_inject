@@ -1,16 +1,15 @@
 package storage
 
 import (
-	"log/slog"
+	"errors"
 	"os"
 	"path"
+	"strings"
 
 	keyring "github.com/99designs/keyring"
 	"github.com/napisani/secret_inject/internal/config"
 	"github.com/napisani/secret_inject/internal/secret"
 )
-
-const key = "secret_inject"
 
 type Keyring struct {
 	keyring keyring.Keyring
@@ -28,8 +27,6 @@ func NewKeyring(storageConfig *config.StorageConfig) (*Keyring, error) {
 			}
 		}
 	}
-
-	slog.Debug("Allowed backends", "backends", allowedBackends)
 
 	tmpDir := os.TempDir()
 	filePath := path.Join(tmpDir, ".keyring.jwt")
@@ -56,7 +53,6 @@ func NewKeyring(storageConfig *config.StorageConfig) (*Keyring, error) {
 		FileDir:                        filePath,
 	}
 
-	slog.Debug("Keyring config", "service", name)
 	kr, err := keyring.Open(keyringConfig)
 
 	if err != nil {
@@ -68,53 +64,66 @@ func NewKeyring(storageConfig *config.StorageConfig) (*Keyring, error) {
 	}, nil
 }
 
-func (s *Keyring) HasCachedSecrets() bool {
-	value, err := s.keyring.Get(key)
-	if err != nil {
-		slog.Debug("Error getting keys", "error", err)
-		return false
-	}
-	return value.Data != nil
-}
-
-func (s *Keyring) GetCachedSecrets() (*secret.Secrets, error) {
-	slog.Debug("Reading cached secrets from keyring")
-	value, err := s.keyring.Get(key)
-	if err != nil {
-		slog.Debug("Error getting key", "error", err)
-		return nil, err
-	}
-
-	secrets, err := secret.Deserialize(value.Data)
-	if err != nil {
-		return nil, err
-	}
-	slog.Debug("Read cached secrets", "count", len(secrets.Entries))
-	return secrets, nil
-}
-
-func (s *Keyring) CacheSecrets(secrets *secret.Secrets) error {
-	slog.Debug("Caching secrets", "count", len(secrets.Entries))
-	serializedSecrets, err := secrets.Serialize()
-	if err != nil {
-		return err
-	}
-
-	err = s.keyring.Set(keyring.Item{Key: key, Data: serializedSecrets})
-	if err != nil {
-		return err
-	}
-
-	slog.Debug("Cached secrets to keyring")
-	return nil
-}
-
-func (s *Keyring) CleanCachedSecrets() error {
-	if !s.HasCachedSecrets() {
-		slog.Debug("No cached secrets to clean")
+func (s *Keyring) Initialize() error {
+	marker, err := s.keyring.Get(migrationMarker)
+	if err == nil {
+		if string(marker.Data) != markerContent {
+			return errors.New("invalid cache migration marker")
+		}
 		return nil
 	}
+	if !errors.Is(err, keyring.ErrKeyNotFound) {
+		return err
+	}
+	if err := s.keyring.Remove("secret_inject"); err != nil && !errors.Is(err, keyring.ErrKeyNotFound) {
+		return err
+	}
+	return s.keyring.Set(keyring.Item{Key: migrationMarker, Data: []byte(markerContent)})
+}
 
-	slog.Debug("Removing cached secrets from keyring", "key", key)
-	return s.keyring.Remove(key)
+func (s *Keyring) Read(scope string) (*secret.Secrets, bool, error) {
+	key, err := cacheKey(scope)
+	if err != nil {
+		return nil, false, err
+	}
+	item, err := s.keyring.Get(key)
+	if errors.Is(err, keyring.ErrKeyNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	snapshot, err := decodeSnapshot(item.Data)
+	return snapshot, err == nil, err
+}
+
+func (s *Keyring) Write(scope string, snapshot *secret.Secrets) error {
+	key, err := cacheKey(scope)
+	if err != nil {
+		return err
+	}
+	data, err := snapshot.Serialize()
+	if err != nil {
+		return err
+	}
+	if _, err := decodeSnapshot(data); err != nil {
+		return err
+	}
+	return s.keyring.Set(keyring.Item{Key: key, Data: data})
+}
+
+func (s *Keyring) CleanAll() error {
+	keys, err := s.keyring.Keys()
+	if err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if !strings.HasPrefix(key, cachePrefix) || !scopePattern.MatchString(strings.TrimPrefix(key, cachePrefix)) {
+			continue
+		}
+		if err := s.keyring.Remove(key); err != nil && !errors.Is(err, keyring.ErrKeyNotFound) {
+			return err
+		}
+	}
+	return nil
 }

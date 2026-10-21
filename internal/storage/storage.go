@@ -1,33 +1,55 @@
 package storage
 
 import (
+	"encoding/json"
 	"errors"
-	"log/slog"
+	"regexp"
 
 	"github.com/napisani/secret_inject/internal/config"
 	"github.com/napisani/secret_inject/internal/secret"
 )
 
+const cachePrefix = "sources-v1-"
+const migrationMarker = "migration-v1.done"
+const markerContent = "v1\n"
+
+var scopePattern = regexp.MustCompile("^[0-9a-f]{64}$")
+
 type Storage interface {
-	HasCachedSecrets() bool
-	GetCachedSecrets() (*secret.Secrets, error)
-	CacheSecrets(secrets *secret.Secrets) error
-	CleanCachedSecrets() error
+	Initialize() error
+	Read(scope string) (*secret.Secrets, bool, error)
+	Write(scope string, secrets *secret.Secrets) error
+	CleanAll() error
 }
 
-func Get(storageConfig *config.StorageConfig) (Storage, error) {
-	if storageConfig == nil {
-		return nil, errors.New("no storage configuration found in config file")
+func cacheKey(scope string) (string, error) {
+	if !scopePattern.MatchString(scope) {
+		return "", errors.New("invalid cache scope")
 	}
+	return cachePrefix + scope, nil
+}
 
-	switch storageConfig.Type {
+func decodeSnapshot(data []byte) (*secret.Secrets, error) {
+	var snapshot secret.Secrets
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return nil, errors.New("invalid cached secret snapshot")
+	}
+	if snapshot.Entries == nil || snapshot.Timestamp.IsZero() {
+		return nil, errors.New("invalid cached secret snapshot")
+	}
+	return &snapshot, nil
+}
+
+func Get(cfg *config.StorageConfig) (Storage, error) {
+	if cfg == nil {
+		return nil, errors.New("storage configuration required")
+	}
+	switch cfg.Type {
 	case "keyring":
-		slog.Debug("Using keyring storage")
-		return NewKeyring(storageConfig)
+		return NewKeyring(cfg)
 	case "file":
-		slog.Debug("Using file storage")
-		return NewFile(), nil
+		return NewFile()
 	default:
-		return nil, errors.New("unknown storage type: must be 'keyring' or 'file'")
+		return nil, errors.New("unknown storage type")
 	}
 }

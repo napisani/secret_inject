@@ -8,11 +8,15 @@ import (
 )
 
 func getPasswordStdin(prompt string) (string, error) {
-	fmt.Printf("%s: ", prompt)
+	if _, err := fmt.Fprintf(os.Stderr, "%s: ", prompt); err != nil {
+		return "", fmt.Errorf("writing password prompt: %w", err)
+	}
 	b, err := term.ReadPassword(int(os.Stdin.Fd()))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("reading password: %w", err)
 	}
-	fmt.Println()
+	if _, err := fmt.Fprintln(os.Stderr); err != nil {
+		return "", fmt.Errorf("writing password prompt newline: %w", err)
+	}
 	return string(b), nil
 }

@@ -2,7 +2,7 @@ package secret
 
 import (
 	"encoding/json"
-	"log/slog"
+	"maps"
 	"time"
 )
 
@@ -23,7 +23,6 @@ func (s *Secrets) Serialize() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	slog.Debug("Serialized secrets", "bytes", len(jsonBytes))
 	return jsonBytes, nil
 }
 
@@ -33,18 +32,13 @@ func Deserialize(jsonBytes []byte) (*Secrets, error) {
 	if err != nil {
 		return nil, err
 	}
-	slog.Debug("Deserialized secrets", "count", len(secrets.Entries))
 	return &secrets, nil
 }
 
 func (s *Secrets) Append(other *Secrets) *Secrets {
 	result := New()
-	for key, value := range s.Entries {
-		result.Entries[key] = value
-	}
-	for key, value := range other.Entries {
-		result.Entries[key] = value
-	}
+	maps.Copy(result.Entries, s.Entries)
+	maps.Copy(result.Entries, other.Entries)
 	return result
 }
 
