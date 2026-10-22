@@ -234,16 +234,65 @@ secret_inject profile check --profile deploy --force --debug
   Without profiles, existing full-set export behavior remains available.
   `config init` deliberately keeps generating the profile-free template.
 
-**Profiles are not access control.** All configured remote sources still fetch;
-all merged values, including bootstrap credentials, are cached. Exclusions and
-renames affect output only, so downstream providers can still use earlier
-credentials. This is not yet an agent execution or sandboxing interface.
+### Project-local env files
+
+Profiles can add local dotenv files and choose whether to use configured remote
+sources:
+
+```json
+{
+  "profiles": {
+    "shell": { "exclude": [] },
+    "project-only": {
+      "exclude": [],
+      "remote_sources": false,
+      "env_files": ["*.env", "*.env.local"]
+    },
+    "project": {
+      "exclude": [],
+      "env_files": ["*.env", "*.env.local"]
+    }
+  }
+}
+```
+
+```bash
+secret_inject --profile project-only
+secret_inject --profile project --output json
+secret_inject profile check --profile project-only
+```
+
+- `remote_sources` defaults to `true`. When false, no remote providers are
+  initialized or fetched, and no remote cache or keyring is opened. A local-only
+  invocation does not require a `storage` block.
+- `env_files` defaults to an empty array. Patterns match filenames in the process's
+  current directory, not the config directory. Parent paths and subdirectory
+  patterns are rejected; subdirectories are not searched and symlinks are refused.
+- Patterns are processed in configured order, with filenames sorted within each
+  pattern; a file is read only once. The example loads `.env` and `app.env` before
+  `.env.local` and `app.env.local`. It does not match `.env.production` or
+  `.env.example`. No matches are allowed and produce no local values.
+- Local files are always read fresh and never cached. Their values override remote
+  values; later files override earlier files. Selection and renaming happen after
+  composition. `--force` affects only remote fetching.
+- Files are parsed as dotenv data, never sourced or executed. Dotenv quoting,
+  comments, multiline values, and references to earlier variables in the same file
+  are supported. These references do not use shell variables or other files.
+  Unreadable or malformed matched files fail without printing their contents.
+
+**Profiles are not access control.** Remote-enabled profiles still fetch and cache
+all configured remote sources, including bootstrap credentials, before output
+selection. Local files do not supply bootstrap credentials to remote providers.
+A local-only export emits only file values but does not unset variables already
+present in the consuming shell. This is not an agent execution or sandboxing
+interface.
 
 ### Cache identity and versioning
 
 Caches are keyed by source definitions and effective source order, not by profile,
 config path, output format, or TTL. Later sources still overwrite duplicate names.
-Changing profiles reuses the full cache; changing sources creates a new scope.
+Remote-enabled profiles reuse the full remote cache; changing sources creates a
+new scope. Local file values are never part of this cache.
 External CLI login/token/account changes cannot be detected: use `--force` after
 changing them. Provider-side edits otherwise become visible after TTL expiry.
 
@@ -300,11 +349,10 @@ Uses OS-native secure storage:
 - `file` - Encrypted file (requires password)
 
 #### File Storage (Development Only)
-⚠️ **Not recommended for production** — stores complete merged secrets in plaintext
+⚠️ **Not recommended for production** — stores complete remote snapshots in plaintext
 under `os.UserCacheDir()/secret_inject/` (for example `~/.cache/secret_inject/`
-on Linux or `~/Library/Caches/secret_inject/` on macOS). This is cache storage,
-not a local `.env` input source; local-file input is a separate planned feature
-and will always be read fresh.
+on Linux or `~/Library/Caches/secret_inject/` on macOS). This is cache storage;
+profile `env_files` inputs are separate and are always read fresh.
 
 ```json
 {

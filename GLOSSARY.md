@@ -6,6 +6,6 @@ from them.
 ## Language
 
 **Snapshot**:
-The complete resolved collection of named secret values from configured sources,
-before profile-specific selection or renaming.
+The complete resolved collection of named secret values from an invocation's
+selected inputs, before variable filtering or renaming.
 _Avoid_: shell environment (when referring to the unselected collection)

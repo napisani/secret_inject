@@ -9,16 +9,19 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/napisani/secret_inject/internal/envfile"
 	"github.com/napisani/secret_inject/internal/secret"
 )
 
 type Profiles map[string]Profile
 
 type Profile struct {
-	mode      string
-	rules     []string
-	overwrite bool
-	rename    map[string]string
+	mode          string
+	rules         []string
+	overwrite     bool
+	rename        map[string]string
+	remoteSources bool
+	envFiles      []string
 }
 
 type Event struct {
@@ -96,7 +99,7 @@ func (p *Profile) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	parsed := Profile{overwrite: true, rename: map[string]string{}}
+	parsed := Profile{overwrite: true, rename: map[string]string{}, remoteSources: true}
 	for key, raw := range fields {
 		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 			return errors.New("profile fields cannot be null")
@@ -113,6 +116,17 @@ func (p *Profile) UnmarshalJSON(data []byte) error {
 		case "overwrite":
 			if err := json.Unmarshal(raw, &parsed.overwrite); err != nil {
 				return errors.New("overwrite must be boolean")
+			}
+		case "remote_sources":
+			if err := json.Unmarshal(raw, &parsed.remoteSources); err != nil {
+				return errors.New("remote_sources must be boolean")
+			}
+		case "env_files":
+			if err := json.Unmarshal(raw, &parsed.envFiles); err != nil {
+				return errors.New("env_files must be a string array")
+			}
+			if err := envfile.ValidatePatterns(parsed.envFiles); err != nil {
+				return err
 			}
 		case "rename":
 			parsed.rename, err = decodeRenames(raw)
@@ -200,6 +214,15 @@ func (ps Profiles) Choose(name *string) (*Profile, error) {
 }
 
 func (p *Profile) Overwrite() bool { return p == nil || p.overwrite }
+
+func (p *Profile) RemoteSources() bool { return p == nil || p.remoteSources }
+
+func (p *Profile) EnvFiles() []string {
+	if p == nil {
+		return nil
+	}
+	return p.envFiles
+}
 
 func ValidName(name string) bool {
 	if name == "" {

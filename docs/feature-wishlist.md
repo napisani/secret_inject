@@ -22,8 +22,9 @@ and deliver them to a shell, command, or file with deliberate exposure controls.
   renaming, shell overwrite control, and values-free missing-include checks.
 - Caches are scoped by source configuration; `--debug` writes a private rotating
   log without secret values or raw provider output.
-- There is no local env-file source, input conversion command, or direct
-  command-execution mode today.
+- Profiles can overlay fresh current-directory dotenv files on remote sources,
+  or disable remote sources and caches entirely for local-only output.
+- There is no input conversion command or direct command-execution mode today.
 
 ## Wishlist
 

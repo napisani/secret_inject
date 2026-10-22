@@ -172,9 +172,6 @@ func execute(args Args, debug *diagnostics.Session) ([]byte, int, error) {
 	if err != nil {
 		return nil, 1, errors.New("configuration could not be read or decoded")
 	}
-	if err := cfg.Validate(); err != nil {
-		return nil, 1, err
-	}
 	var requested *string
 	if args.ProfileSet {
 		requested = &args.Profile
@@ -183,14 +180,19 @@ func execute(args Args, debug *diagnostics.Session) ([]byte, int, error) {
 	if !args.Clean && selectedErr != nil {
 		return nil, 1, selectedErr
 	}
+	if args.Clean || selected.RemoteSources() {
+		if err := cfg.Validate(); err != nil {
+			return nil, 1, err
+		}
+	}
 	if args.ProfileSet {
 		debug.Record(diagnostics.Event{Kind: diagnostics.ProfileSelected, Profile: args.Profile})
 	}
-	store, err := storage.Get(cfg.Storage)
-	if err != nil {
-		return nil, 1, errors.New("cache backend unavailable")
-	}
 	if args.Clean {
+		store, err := storage.Get(cfg.Storage)
+		if err != nil {
+			return nil, 1, errors.New("cache backend unavailable")
+		}
 		debug.Record(diagnostics.Event{Kind: diagnostics.StorageProgress, Operation: "cleanup", State: "started"})
 		if err := store.CleanAll(); err != nil {
 			return nil, 1, errors.New("cache cleanup failed")
@@ -199,17 +201,7 @@ func execute(args Args, debug *diagnostics.Session) ([]byte, int, error) {
 		debug.Record(diagnostics.Event{Kind: diagnostics.ResultPrepared, Operation: "clean"})
 		return []byte("Cached secrets cleaned successfully\n"), 0, nil
 	}
-	debug.Record(diagnostics.Event{Kind: diagnostics.StorageProgress, Operation: "initialize", State: "started"})
-	if err := store.Initialize(); err != nil {
-		return nil, 1, errors.New("cache initialization failed")
-	}
-	debug.Record(diagnostics.Event{Kind: diagnostics.StorageProgress, Operation: "initialize", State: "completed"})
-	secrets, err := loadMerged(
-		cfg,
-		args,
-		store,
-		debug,
-	)
+	secrets, err := loadSnapshot(cfg, args, selected, debug)
 	if err != nil {
 		return nil, 1, err
 	}
