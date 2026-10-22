@@ -239,7 +239,7 @@ all merged values, including bootstrap credentials, are cached. Exclusions and
 renames affect output only, so downstream providers can still use earlier
 credentials. This is not yet an agent execution or sandboxing interface.
 
-### Cache identity and migration
+### Cache identity and versioning
 
 Caches are keyed by source definitions and effective source order, not by profile,
 config path, output format, or TTL. Later sources still overwrite duplicate names.
@@ -247,14 +247,15 @@ Changing profiles reuses the full cache; changing sources creates a new scope.
 External CLI login/token/account changes cannot be detected: use `--force` after
 changing them. Provider-side edits otherwise become visible after TTL expiry.
 
-On first use of each backend, the tool deletes its old unscoped cache without
-reading it and writes a migration marker. File storage deletes the old temp
-`.secret_inject.cache`; keyring storage deletes the old `secret_inject` key.
-Stop old binaries before upgrading so they cannot recreate old entries. Failed
-migration stops the operation; no old-cache compatibility mode exists.
+Each backend stores a `cache-version` sentinel. If it is missing, unreadable, or
+different from the current version, the tool discards its scoped and old unscoped
+cache entries without decoding them, then writes the current version. No cached
+data is migrated. Stop old binaries before upgrading so they cannot recreate old
+entries. A failed cache reset stops the operation.
 
-`--clean` removes all scoped caches in the selected backend, preserves the marker
-and unrelated data, and does not require installed provider CLIs. It cannot be
+`--clean` discards cache entries directly without checking their version, then
+writes the current sentinel. It preserves unrelated data and does not require
+installed provider CLIs. It cannot be
 combined with `--profile`. It does not clean unopened keyring backends or prevent
 another process from repopulating a cache concurrently.
 

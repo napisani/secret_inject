@@ -11,7 +11,7 @@ import (
 	"github.com/napisani/secret_inject/internal/secret"
 )
 
-func TestStorageScopedLifecycleAndMigration(t *testing.T) {
+func TestStorageScopedLifecycleAndVersion(t *testing.T) {
 	for _, kind := range []string{"file", "keyring"} {
 		t.Run(kind, func(t *testing.T) {
 			root := t.TempDir()
@@ -91,7 +91,49 @@ func TestStorageScopedLifecycleAndMigration(t *testing.T) {
 	}
 }
 
-func TestFileMigrationFailureAndCleanupBoundaries(t *testing.T) {
+func TestFileKeyringCacheVersion(t *testing.T) {
+	directory := t.TempDir()
+	raw, err := keyring.Open(keyring.Config{
+		AllowedBackends: []keyring.BackendType{keyring.FileBackend},
+		FileDir:         directory,
+		FilePasswordFunc: func(string) (string, error) {
+			return "synthetic fixture password", nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &Keyring{keyring: raw}
+	if err := store.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	scope := strings.Repeat("a", 64)
+	for key, data := range map[string]string{
+		cachePrefix + scope: "opaque old snapshot",
+		cacheVersionKey:     "old",
+	} {
+		if err := raw.Set(keyring.Item{Key: key, Data: []byte(data)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := store.Read(scope); err != nil || found {
+		t.Fatal("old-version cache was not discarded")
+	}
+	if err := os.WriteFile(filepath.Join(directory, cacheVersionKey), []byte("not an encrypted item"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CleanAll(); err != nil {
+		t.Fatal("cleanup tried to decode old cache metadata:", err)
+	}
+	if err := store.Initialize(); err != nil {
+		t.Fatal("cleanup did not write the current version:", err)
+	}
+}
+
+func TestFileResetFailureAndCleanupBoundaries(t *testing.T) {
 	root := t.TempDir()
 	legacy := filepath.Join(root, "legacy")
 	if err := os.Mkdir(legacy, 0700); err != nil {
@@ -99,10 +141,10 @@ func TestFileMigrationFailureAndCleanupBoundaries(t *testing.T) {
 	}
 	store := &File{directory: filepath.Join(root, "cache"), legacyPath: legacy}
 	if err := store.Initialize(); err == nil {
-		t.Fatal("migration deleted a directory instead of a legacy cache file")
+		t.Fatal("cache reset deleted a directory")
 	}
-	if _, err := os.Stat(filepath.Join(store.directory, migrationMarker)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("failed migration left marker")
+	if _, err := os.Stat(filepath.Join(store.directory, cacheVersionKey)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("failed reset recorded the current version")
 	}
 	if err := os.Remove(legacy); err != nil {
 		t.Fatal(err)
@@ -146,29 +188,28 @@ func (r *failingKeyring) Keys() ([]string, error) {
 	return r.Keyring.Keys()
 }
 
-func TestKeyringMigrationAndEnumerationErrorsPropagate(t *testing.T) {
-	for _, operation := range []string{"remove", "set"} {
+func TestKeyringResetErrorsPropagate(t *testing.T) {
+	for _, operation := range []string{"remove", "set", "keys"} {
 		raw := &keyring.ArrayKeyring{}
+		if err := raw.Set(keyring.Item{Key: "secret_inject", Data: []byte("opaque")}); err != nil {
+			t.Fatal(err)
+		}
 		ring := &failingKeyring{Keyring: raw, operation: operation}
 		store := &Keyring{keyring: ring}
 		if err := store.Initialize(); err == nil {
-			t.Fatal("migration error suppressed")
+			t.Fatal("cache reset error suppressed")
 		}
-		if _, err := raw.Get(migrationMarker); !errors.Is(err, keyring.ErrKeyNotFound) {
-			t.Fatal("failed migration recorded completion")
+		if _, err := raw.Get(cacheVersionKey); !errors.Is(err, keyring.ErrKeyNotFound) {
+			t.Fatal("failed reset recorded the current version")
 		}
 		ring.operation = ""
 		if err := store.Initialize(); err != nil {
 			t.Fatal(err)
 		}
-		ring.operation = "keys"
-		if err := store.CleanAll(); err == nil {
-			t.Fatal("enumeration error suppressed")
-		}
 	}
 }
 
-func TestCorruptCachesAndMarkersFail(t *testing.T) {
+func TestCorruptSnapshotsAndOldCacheVersion(t *testing.T) {
 	ring := &keyring.ArrayKeyring{}
 	store := &Keyring{keyring: ring}
 	if err := store.Initialize(); err != nil {
@@ -183,11 +224,14 @@ func TestCorruptCachesAndMarkersFail(t *testing.T) {
 			t.Fatal("corrupt cache treated as hit/miss")
 		}
 	}
-	if err := ring.Set(keyring.Item{Key: "migration-v1.done", Data: []byte("invalid")}); err != nil {
+	if err := ring.Set(keyring.Item{Key: cacheVersionKey, Data: []byte("old")}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Initialize(); err == nil {
-		t.Fatal("invalid marker accepted")
+	if err := store.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := store.Read(scope); err != nil || found {
+		t.Fatal("old-version snapshot was not discarded")
 	}
 	if err := store.Write("../escape", secret.New()); err == nil {
 		t.Fatal("unsafe scope accepted")

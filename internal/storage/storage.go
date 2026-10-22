@@ -10,8 +10,10 @@ import (
 )
 
 const cachePrefix = "sources-v1-"
-const migrationMarker = "migration-v1.done"
-const markerContent = "v1\n"
+const cacheVersionKey = "cache-version"
+
+// Bump when stored snapshots or cache rules become incompatible.
+const cacheVersion = "1\n"
 
 var scopePattern = regexp.MustCompile("^[0-9a-f]{64}$")
 

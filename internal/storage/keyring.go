@@ -65,20 +65,11 @@ func NewKeyring(storageConfig *config.StorageConfig) (*Keyring, error) {
 }
 
 func (s *Keyring) Initialize() error {
-	marker, err := s.keyring.Get(migrationMarker)
-	if err == nil {
-		if string(marker.Data) != markerContent {
-			return errors.New("invalid cache migration marker")
-		}
+	version, err := s.keyring.Get(cacheVersionKey)
+	if err == nil && string(version.Data) == cacheVersion {
 		return nil
 	}
-	if !errors.Is(err, keyring.ErrKeyNotFound) {
-		return err
-	}
-	if err := s.keyring.Remove("secret_inject"); err != nil && !errors.Is(err, keyring.ErrKeyNotFound) {
-		return err
-	}
-	return s.keyring.Set(keyring.Item{Key: migrationMarker, Data: []byte(markerContent)})
+	return s.CleanAll()
 }
 
 func (s *Keyring) Read(scope string) (*secret.Secrets, bool, error) {
@@ -118,12 +109,13 @@ func (s *Keyring) CleanAll() error {
 		return err
 	}
 	for _, key := range keys {
-		if !strings.HasPrefix(key, cachePrefix) || !scopePattern.MatchString(strings.TrimPrefix(key, cachePrefix)) {
+		if key != "secret_inject" && (!strings.HasPrefix(key, cachePrefix) || !scopePattern.MatchString(strings.TrimPrefix(key, cachePrefix))) {
 			continue
 		}
-		if err := s.keyring.Remove(key); err != nil && !errors.Is(err, keyring.ErrKeyNotFound) {
+		if err := s.keyring.Remove(key); err != nil &&
+			!errors.Is(err, keyring.ErrKeyNotFound) && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
-	return nil
+	return s.keyring.Set(keyring.Item{Key: cacheVersionKey, Data: []byte(cacheVersion)})
 }

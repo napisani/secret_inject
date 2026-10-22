@@ -47,11 +47,11 @@ func parseArgs(argv []string, stderr io.Writer) (Args, error) {
 		args.Check = true
 		argv = argv[2:]
 	}
-    commandName := "secret_inject"
-    if args.Check {
-        commandName += " profile check"
-    }
-    fs := flag.NewFlagSet(commandName, flag.ContinueOnError)
+	commandName := "secret_inject"
+	if args.Check {
+		commandName += " profile check"
+	}
+	fs := flag.NewFlagSet(commandName, flag.ContinueOnError)
 	var parseOutput strings.Builder
 	fs.SetOutput(&parseOutput)
 	fs.StringVar(&args.ConfigFile, "config", defaultFile, "Config file path")
@@ -190,11 +190,6 @@ func execute(args Args, debug *diagnostics.Session) ([]byte, int, error) {
 	if err != nil {
 		return nil, 1, errors.New("cache backend unavailable")
 	}
-	debug.Record(diagnostics.Event{Kind: diagnostics.StorageProgress, Operation: "migration", State: "started"})
-	if err := store.Initialize(); err != nil {
-		return nil, 1, errors.New("cache migration failed")
-	}
-	debug.Record(diagnostics.Event{Kind: diagnostics.StorageProgress, Operation: "migration", State: "completed"})
 	if args.Clean {
 		debug.Record(diagnostics.Event{Kind: diagnostics.StorageProgress, Operation: "cleanup", State: "started"})
 		if err := store.CleanAll(); err != nil {
@@ -204,6 +199,11 @@ func execute(args Args, debug *diagnostics.Session) ([]byte, int, error) {
 		debug.Record(diagnostics.Event{Kind: diagnostics.ResultPrepared, Operation: "clean"})
 		return []byte("Cached secrets cleaned successfully\n"), 0, nil
 	}
+	debug.Record(diagnostics.Event{Kind: diagnostics.StorageProgress, Operation: "initialize", State: "started"})
+	if err := store.Initialize(); err != nil {
+		return nil, 1, errors.New("cache initialization failed")
+	}
+	debug.Record(diagnostics.Event{Kind: diagnostics.StorageProgress, Operation: "initialize", State: "completed"})
 	secrets, err := loadMerged(
 		cfg,
 		args,

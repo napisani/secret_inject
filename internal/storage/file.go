@@ -30,25 +30,11 @@ func (s *File) Initialize() error {
 	if err := privatefs.EnsureDir(s.directory); err != nil {
 		return err
 	}
-	marker, err := privatefs.ReadFile(filepath.Join(s.directory, migrationMarker))
-	if err == nil {
-		if string(marker) != markerContent {
-			return errors.New("invalid cache migration marker")
-		}
+	version, err := privatefs.ReadFile(filepath.Join(s.directory, cacheVersionKey))
+	if err == nil && string(version) == cacheVersion {
 		return nil
 	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if info, err := os.Lstat(s.legacyPath); err == nil && info.IsDir() {
-		return errors.New("legacy cache path is a directory")
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err := os.Remove(s.legacyPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return privatefs.WriteAtomic(s.directory, migrationMarker, []byte(markerContent))
+	return s.CleanAll()
 }
 
 func (s *File) Read(scope string) (*secret.Secrets, bool, error) {
@@ -83,6 +69,17 @@ func (s *File) Write(scope string, snapshot *secret.Secrets) error {
 }
 
 func (s *File) CleanAll() error {
+	if err := privatefs.EnsureDir(s.directory); err != nil {
+		return err
+	}
+	if info, err := os.Lstat(s.legacyPath); err == nil && info.IsDir() {
+		return errors.New("legacy cache path is a directory")
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.Remove(s.legacyPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	entries, err := os.ReadDir(s.directory)
 	if err != nil {
 		return err
@@ -100,5 +97,5 @@ func (s *File) CleanAll() error {
 			return err
 		}
 	}
-	return nil
+	return privatefs.WriteAtomic(s.directory, cacheVersionKey, []byte(cacheVersion))
 }
