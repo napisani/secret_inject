@@ -12,11 +12,17 @@ package storage
 
 static OSStatus si_open(const char *path, int setup, SecKeychainRef *keychain) {
     OSStatus status = SecKeychainOpen(path, keychain);
-    if (status == errSecNoSuchKeychain && setup)
+    SecKeychainStatus state = 0;
+    // SecKeychainOpen may return a reference before checking file existence.
+    if (status == errSecSuccess)
+        status = SecKeychainGetStatus(*keychain, &state);
+    if (status == errSecNoSuchKeychain && setup) {
+        if (*keychain) CFRelease(*keychain);
+        *keychain = NULL;
         status = SecKeychainCreate(path, 0, NULL, true, NULL, keychain);
-    if (status != errSecSuccess) return status;
-    SecKeychainStatus state;
-    status = SecKeychainGetStatus(*keychain, &state);
+        if (status == errSecSuccess)
+            status = SecKeychainGetStatus(*keychain, &state);
+    }
     if (status != errSecSuccess) return status;
     if (!(state & kSecUnlockStateStatus)) {
         if (!setup) return errSecInteractionNotAllowed;
