@@ -200,8 +200,12 @@ func storeCommand(argv []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return reportCommandFailure(stderr, preparationFailure(context.Background(), err))
 	}
+	accessErr := store.PrepareAccess(context.Background())
 	if err := store.Close(); err != nil {
 		return reportCommandFailure(stderr, failureFinalization)
+	}
+	if accessErr != nil {
+		return reportCommandFailure(stderr, preparationFailure(context.Background(), accessErr))
 	}
 	response := struct {
 		SchemaVersion int `json:"schema_version"`

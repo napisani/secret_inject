@@ -117,6 +117,31 @@ func NewRecordStore(native NativeByteAdapter, lock StoreLock) (*RecordStore, err
 	return store, nil
 }
 
+// PrepareAccess requests item approval for the current executable when supported.
+// An unlocked native container does not establish access to its existing items.
+func (s *RecordStore) PrepareAccess(ctx context.Context) error {
+	return s.withLock(ctx, func() error {
+		keys, err := s.native.Keys(ctx)
+		if err != nil {
+			return safeStoreFailure(err)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			// Obsolete payloads need no approval because they are discarded unread.
+			owned := key == credentialRevisionKey || key == snapshotFormatKey ||
+				strings.HasPrefix(key, credentialPrefix) || strings.HasPrefix(key, workloadPrefix) ||
+				strings.HasPrefix(key, objectChunksPrefix)
+			if !owned {
+				continue
+			}
+			if _, _, err := s.native.Get(ctx, key); err != nil {
+				return safeStoreFailure(err)
+			}
+		}
+		return nil
+	})
+}
+
 func (s *RecordStore) SetCredential(ctx context.Context, name, provider, value string) error {
 	if !validCredential(name, provider, value) {
 		return ErrInvalidCredential

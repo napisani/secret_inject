@@ -26,7 +26,8 @@ static OSStatus si_open(const char *path, int setup, SecKeychainRef *keychain) {
     if (status != errSecSuccess) return status;
     if (!(state & kSecUnlockStateStatus)) {
         if (!setup) return errSecInteractionNotAllowed;
-        return SecKeychainUnlock(*keychain, 0, NULL, true);
+        // A null password requires usePassword=false to request OS authentication.
+        return SecKeychainUnlock(*keychain, 0, NULL, false);
     }
     return errSecSuccess;
 }
@@ -152,10 +153,12 @@ func (m *macNative) operation(ctx context.Context, run func() C.OSStatus) (err e
 	if status := C.SecKeychainGetUserInteractionAllowed(&previous); status != C.errSecSuccess {
 		return keychainStatus(status)
 	}
-	if m.policy == Unattended {
-		if status := C.SecKeychainSetUserInteractionAllowed(0); status != C.errSecSuccess {
-			return keychainStatus(status)
-		}
+	allowed := C.Boolean(0)
+	if m.policy == InteractiveSetup {
+		allowed = 1
+	}
+	if status := C.SecKeychainSetUserInteractionAllowed(allowed); status != C.errSecSuccess {
+		return keychainStatus(status)
 	}
 	defer func() {
 		err = errors.Join(err, keychainStatus(C.SecKeychainSetUserInteractionAllowed(previous)), ctx.Err())

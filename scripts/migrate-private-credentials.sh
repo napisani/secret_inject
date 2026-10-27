@@ -526,6 +526,12 @@ except (OSError, ValueError, TypeError):
     raise SystemExit("Active config does not match the staged migration; review host selection/activation.")
 print("  Active config matches the staged sources, binding, native backend, and profiles.")
 PY
+say 'Candidate preparation does not establish readiness for the installed executable.'
+say 'Explicit preparation may show OS unlock and item-access dialogs for several protected items.'
+say 'Approve only the expected installed CLI; choose Always Allow for its item-access prompts if offered.'
+say 'Enter the app-keychain password only in the OS dialog; values are never printed here.'
+confirm 'Allow explicit native-store preparation with the installed CLI now?' || exit 1
+"$INSTALLED_CLI" store prepare --config "$ACTIVE_CONFIG"
 verify_cached_export "$INSTALLED_CLI" "$ACTIVE_CONFIG"
 write_env INSTALLED_CLI "$INSTALLED_CLI"
 step 'Open two fresh terminal shells using the default shell profile.'

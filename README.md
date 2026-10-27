@@ -114,8 +114,13 @@ secret_inject credential remove work-root --config ./secrets.json
   receipts contain only name/provider fields. Removal deletes the local record,
   not the vendor's token.
 - `store prepare` can create/unlock/request OS authorization without replacing
-  credentials or changing their revision merely for preparation. Authorization
-  may still be item-specific or change later.
+  credentials or changing their revision. It probes current protected items for
+  access without decoding or exporting their values; obsolete payloads are skipped.
+  On macOS, enter the app-keychain password only in OS dialogs, never CLI arguments.
+  Approval can be item- and executable-specific: use the final installed binary,
+  not a temporary build. Choose persistent approval for that binary when offered
+  so later invocations can run unattended. The CLI does not rewrite item ACLs or
+  grant access to every application. Approval may need renewal after binary changes.
 - A `from_source` binding names an exact original output key in an earlier enabled
   source. That entry is extracted into a private in-memory channel **before**
   workload merge, cache publication, filtering, renaming, or collision logging.
