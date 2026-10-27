@@ -3,6 +3,7 @@ package source
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -71,6 +72,31 @@ func ResolveSourceOrder(sequence []string, sourcesConfig map[string]json.RawMess
 	ordered = append(ordered, remaining...)
 
 	return ordered, nil
+}
+
+func KnownProvider(name string) bool {
+	_, known := sourceRegistry[name]
+	return known
+}
+
+// DeclaredSourceOrder excludes disabled sources without initializing providers.
+func DeclaredSourceOrder(sourcesConfig map[string]json.RawMessage, sequence []string) ([]string, error) {
+	keys, err := ResolveSourceOrder(sequence, sourcesConfig)
+	if err != nil {
+		return nil, err
+	}
+	declared := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if !KnownProvider(key) {
+			return nil, errors.New("unknown source declaration")
+		}
+		raw := bytes.TrimSpace(sourcesConfig[key])
+		if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+			continue
+		}
+		declared = append(declared, key)
+	}
+	return declared, nil
 }
 
 // LoadAll instantiates and initializes every configured source, in the order

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -81,11 +80,9 @@ func TestExistingBackupIsPrivateAndSymlinkTargetsAreRefused(t *testing.T) {
 	if err := s.Finish(); err != nil {
 		t.Fatal(err)
 	}
-	if runtime.GOOS != "windows" {
-		info, err := os.Stat(path + ".1")
-		if err != nil || info.Mode().Perm() != 0600 {
-			t.Fatal("existing backup permissions not enforced")
-		}
+	info, err := os.Stat(path + ".1")
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal("existing backup permissions not enforced")
 	}
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)

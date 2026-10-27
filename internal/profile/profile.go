@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 
 	"github.com/napisani/secret_inject/internal/envfile"
+	"github.com/napisani/secret_inject/internal/jsonobject"
 	"github.com/napisani/secret_inject/internal/secret"
 )
 
@@ -40,42 +40,8 @@ type MissingReport struct {
 	MissingIncludes []string `json:"missing_includes"`
 }
 
-func object(data []byte) (map[string]json.RawMessage, error) {
-	d := json.NewDecoder(bytes.NewReader(data))
-	token, err := d.Token()
-	if err != nil || token != json.Delim('{') {
-		return nil, errors.New("expected an object")
-	}
-	fields := make(map[string]json.RawMessage)
-	for d.More() {
-		token, err := d.Token()
-		if err != nil {
-			return nil, errors.New("invalid object")
-		}
-		name, ok := token.(string)
-		if !ok {
-			return nil, errors.New("invalid object key")
-		}
-		if _, exists := fields[name]; exists {
-			return nil, errors.New("duplicate profile field or name")
-		}
-		var raw json.RawMessage
-		if err := d.Decode(&raw); err != nil {
-			return nil, errors.New("invalid profile field")
-		}
-		fields[name] = raw
-	}
-	if _, err := d.Token(); err != nil {
-		return nil, errors.New("invalid object ending")
-	}
-	if _, err := d.Token(); err != io.EOF {
-		return nil, errors.New("unexpected trailing data")
-	}
-	return fields, nil
-}
-
 func (ps *Profiles) UnmarshalJSON(data []byte) error {
-	fields, err := object(data)
+	fields, err := jsonobject.Decode(data)
 	if err != nil {
 		return err
 	}
@@ -95,7 +61,7 @@ func (ps *Profiles) UnmarshalJSON(data []byte) error {
 }
 
 func (p *Profile) UnmarshalJSON(data []byte) error {
-	fields, err := object(data)
+	fields, err := jsonobject.Decode(data)
 	if err != nil {
 		return err
 	}
@@ -149,7 +115,7 @@ func (p *Profile) UnmarshalJSON(data []byte) error {
 }
 
 func decodeRenames(data []byte) (map[string]string, error) {
-	mappings, err := object(data)
+	mappings, err := jsonobject.Decode(data)
 	if err != nil {
 		return nil, errors.New("rename must be an object")
 	}

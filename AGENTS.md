@@ -2,7 +2,7 @@
 
 CLI for fetching secrets from external secret managers (Doppler, 1Password,
 Bitwarden), caching them locally, and injecting them as environment variables.
-See `README.md` for user-facing usage and supported backends.
+Supported platforms are Linux and macOS. See `README.md` for usage and backends.
 
 ## Build & Test Commands
 
@@ -25,7 +25,7 @@ Prefer the `make` targets over invoking `go` directly.
 - **Language**: Go. Standard `gofmt` formatting.
 - **Errors**: return explicit errors; no panics (proper error handling is a stated project goal — see README).
 - **Secret backends**: each manager (Doppler `doppler`, 1Password `op`, Bitwarden `bws`) is invoked via its own CLI; keep backend logic isolated behind a common interface in `internal/`.
-- **Caching**: secrets cache via keyring (macOS Keychain, Windows Credential Manager, Linux secret service) with a configurable TTL; file storage is a dev-only fallback.
+- **Caching**: credentials and workload snapshots share macOS Keychain or Linux Secret Service with a configurable workload TTL. File storage is retained only for explicit legacy cache cleanup.
 - **Output formats**: support shell, JSON, and env-file output — keep these consistent when adding fields.
 
 ## Release

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/napisani/secret_inject/internal/config"
 	"github.com/napisani/secret_inject/internal/storage"
@@ -111,15 +112,18 @@ func TestProjectOverlaysFreshFilesWithoutCachingThem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := storage.Get(parsed.Storage)
+	store, err := openProtectedStore(t.Context(), parsed.Storage, storage.Unattended)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cached, found, err := store.Read(scope)
-	if err != nil || !found || cached.Entries["API_KEY"] != "DISCARDED_SENTINEL" {
+	cached, found, err := store.ReadSnapshot(t.Context(), scope, time.Hour)
+	if closeErr := store.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil || !found || cached.Secrets.Entries["API_KEY"] != "DISCARDED_SENTINEL" {
 		t.Fatal("remote cache was not retained independently")
 	}
-	if _, exists := cached.Entries["PROJECT_ONLY"]; exists {
+	if _, exists := cached.Secrets.Entries["PROJECT_ONLY"]; exists {
 		t.Fatal("local file value leaked into the remote cache")
 	}
 	t.Setenv("SI_PROVIDER_FAIL", "1")

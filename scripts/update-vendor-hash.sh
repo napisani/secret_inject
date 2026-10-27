@@ -33,7 +33,7 @@ echo "Building with a fake vendorHash to force a hash-mismatch error..."
 sed -i.bak "s|vendorHash = \"$current_hash\"|vendorHash = \"$FAKE_HASH\"|" "$FLAKE_FILE"
 rm -f "$FLAKE_FILE.bak"
 
-build_output="$(nix build .#default 2>&1 || true)"
+build_output="$(nix build "path:$PWD#default" --no-link 2>&1 || true)"
 # `|| true` guards the whole pipeline: under `pipefail`, grep finding no match
 # (e.g. the build failed for a reason unrelated to the hash, like a genuinely
 # broken go.sum) would otherwise make this assignment itself a failing
@@ -54,5 +54,5 @@ trap - ERR # new_hash is now written; a verification failure below shouldn't rev
 
 echo "vendorHash: $current_hash -> $new_hash"
 echo "Verifying with a real build..."
-nix build .#default
+nix build "path:$PWD#default" --no-link
 echo "OK: vendorHash updated and verified."

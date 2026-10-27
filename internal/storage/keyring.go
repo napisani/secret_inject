@@ -3,119 +3,54 @@ package storage
 import (
 	"errors"
 	"os"
-	"path"
+	"path/filepath"
 	"strings"
 
-	keyring "github.com/99designs/keyring"
-	"github.com/napisani/secret_inject/internal/config"
-	"github.com/napisani/secret_inject/internal/secret"
+	"github.com/napisani/secret_inject/internal/privatefs"
 )
 
-type Keyring struct {
-	keyring keyring.Keyring
-}
-
-func NewKeyring(storageConfig *config.StorageConfig) (*Keyring, error) {
-	name := "secret_inject"
-
-	allowedBackends := []keyring.BackendType{}
-	availableBackends := keyring.AvailableBackends()
-	for _, backend := range storageConfig.AllowedBackends {
-		for _, availableBackend := range availableBackends {
-			if backend == string(availableBackend) {
-				allowedBackends = append(allowedBackends, availableBackend)
-			}
-		}
-	}
-
-	tmpDir := os.TempDir()
-	filePath := path.Join(tmpDir, ".keyring.jwt")
-
-	masterPassword := storageConfig.Password
-
-	getPassword := func(prompt string) (string, error) {
-		if masterPassword != "" {
-			return masterPassword, nil
-		}
-		return getPasswordStdin(prompt)
-	}
-
-	keyringConfig := keyring.Config{
-		AllowedBackends:                allowedBackends,
-		ServiceName:                    name,
-		KeychainTrustApplication:       true,
-		KeychainName:                   name,
-		KWalletAppID:                   name,
-		KeychainSynchronizable:         false,
-		KeychainAccessibleWhenUnlocked: true,
-		FilePasswordFunc:               getPassword,
-		KeychainPasswordFunc:           getPassword,
-		FileDir:                        filePath,
-	}
-
-	kr, err := keyring.Open(keyringConfig)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &Keyring{
-		keyring: kr,
-	}, nil
-}
-
-func (s *Keyring) Initialize() error {
-	version, err := s.keyring.Get(cacheVersionKey)
-	if err == nil && string(version.Data) == cacheVersion {
+// CleanLegacyEncryptedFile removes only app-owned cache entries without decoding.
+func CleanLegacyEncryptedFile(directory string) (err error) {
+	if _, err := os.Lstat(directory); errors.Is(err, os.ErrNotExist) {
 		return nil
+	} else if err != nil {
+		return ErrStoreOperation
 	}
-	return s.CleanAll()
-}
-
-func (s *Keyring) Read(scope string) (*secret.Secrets, bool, error) {
-	key, err := cacheKey(scope)
+	if err := privatefs.EnsureDir(directory); err != nil {
+		return ErrStoreUnavailable
+	}
+	root, err := os.OpenRoot(directory)
 	if err != nil {
-		return nil, false, err
+		return ErrStoreUnavailable
 	}
-	item, err := s.keyring.Get(key)
-	if errors.Is(err, keyring.ErrKeyNotFound) {
-		return nil, false, nil
-	}
+	defer func() { err = errors.Join(err, safeStoreFailure(root.Close())) }()
+	entries, err := os.ReadDir(directory)
 	if err != nil {
-		return nil, false, err
+		return ErrStoreOperation
 	}
-	snapshot, err := decodeSnapshot(item.Data)
-	return snapshot, err == nil, err
-}
-
-func (s *Keyring) Write(scope string, snapshot *secret.Secrets) error {
-	key, err := cacheKey(scope)
-	if err != nil {
-		return err
-	}
-	data, err := snapshot.Serialize()
-	if err != nil {
-		return err
-	}
-	if _, err := decodeSnapshot(data); err != nil {
-		return err
-	}
-	return s.keyring.Set(keyring.Item{Key: key, Data: data})
-}
-
-func (s *Keyring) CleanAll() error {
-	keys, err := s.keyring.Keys()
-	if err != nil {
-		return err
-	}
-	for _, key := range keys {
-		if key != "secret_inject" && (!strings.HasPrefix(key, cachePrefix) || !scopePattern.MatchString(strings.TrimPrefix(key, cachePrefix))) {
+	for _, entry := range entries {
+		name := entry.Name()
+		owned := name == "secret_inject" || name == cacheVersionKey || strings.HasPrefix(name, cachePrefix) && scopePattern.MatchString(strings.TrimPrefix(name, cachePrefix))
+		if !owned {
 			continue
 		}
-		if err := s.keyring.Remove(key); err != nil &&
-			!errors.Is(err, keyring.ErrKeyNotFound) && !errors.Is(err, os.ErrNotExist) {
-			return err
+		info, err := root.Lstat(name)
+		if err != nil {
+			return ErrStoreOperation
+		}
+		if !info.Mode().IsRegular() {
+			return ErrStoreOperation
+		}
+		file, err := privatefs.Open(filepath.Join(directory, name), os.O_RDONLY)
+		if err != nil {
+			return ErrStoreUnavailable
+		}
+		if err := file.Close(); err != nil {
+			return ErrStoreOperation
+		}
+		if err := root.Remove(name); err != nil {
+			return ErrStoreOperation
 		}
 	}
-	return s.keyring.Set(keyring.Item{Key: cacheVersionKey, Data: []byte(cacheVersion)})
+	return nil
 }

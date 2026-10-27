@@ -13,6 +13,7 @@ type onePasswordConfig struct {
 }
 
 type OnePassword struct {
+	command providerCommand
 	secrets map[string]string
 	enabled bool
 }
@@ -58,7 +59,7 @@ func (s *OnePassword) GetAllSecrets(previous *secret.Secrets) (*secret.Secrets, 
 	results := secret.New()
 	env := buildCommandEnv(previous)
 	for envVar, ref := range s.secrets {
-		output, err := runCLICommand(
+		output, err := sourceCommand(s.command)(
 			"op",
 			env,
 			"read",

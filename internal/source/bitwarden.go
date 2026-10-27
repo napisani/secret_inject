@@ -41,6 +41,7 @@ func (r *bitwardenRef) UnmarshalJSON(data []byte) error {
 }
 
 type Bitwarden struct {
+	command providerCommand
 	byID    []bitwardenSecretConfig
 	byKey   map[string][]bitwardenSecretConfig
 	enabled bool
@@ -108,7 +109,7 @@ func (s *Bitwarden) GetAllSecrets(previous *secret.Secrets) (*secret.Secrets, er
 	env := buildCommandEnv(previous)
 
 	for _, entry := range s.byID {
-		output, err := runCLICommand(
+		output, err := sourceCommand(s.command)(
 			"bws",
 			env,
 			"secret",
@@ -133,7 +134,7 @@ func (s *Bitwarden) GetAllSecrets(previous *secret.Secrets) (*secret.Secrets, er
 			args = append(args, projectID)
 		}
 
-		output, err := runCLICommand("bws", env, args...)
+		output, err := sourceCommand(s.command)("bws", env, args...)
 		if err != nil {
 			return nil, err
 		}

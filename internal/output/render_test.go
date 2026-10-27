@@ -3,7 +3,6 @@ package output
 import (
 	"encoding/json"
 	"os/exec"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -11,9 +10,6 @@ import (
 )
 
 func TestRenderShellPreservesConsumingShellState(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX shell required")
-	}
 	s := secret.New()
 	s.Entries = map[string]string{"SET": "fetched", "EMPTY": "fetched", "LOCAL": "fetched", "NEW": "a'\n$HOME`false`"}
 	rendered, err := Render(s, "shell", false)

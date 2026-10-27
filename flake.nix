@@ -25,6 +25,7 @@
           inherit version;
           src = ./.;
           subPackages = [ "cmd/secret_inject" ];
+          env.CGO_ENABLED = if pkgs.stdenv.hostPlatform.isDarwin then "1" else "0";
 
           # This hash locks the dependencies of this package. It is
           # necessary because of how Go requires network access to resolve
@@ -38,7 +39,7 @@
 
           # Set to the actual hash after first build, or run `nix build 2>&1 | grep "got:"`
           # to extract the correct hash
-          vendorHash = "sha256-CqYzGDmDGAWjtRNJbF0rbyg3q2jV5/Z781574U/r+L0=";
+          vendorHash = "sha256-AKxAOfC0QThu2MF1+nmn/ktPlWwRMoBD3wdKytjAUEw=";
         };
 
         devShells.default = pkgs.mkShell { buildInputs = devDeps; };

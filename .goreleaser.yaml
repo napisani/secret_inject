@@ -1,13 +1,11 @@
 # GoReleaser configuration for secret_inject
 # https://goreleaser.com
 version: 2
-
-before:
-  hooks:
-    - go mod tidy
+project_name: secret_inject
 
 builds:
-  - env:
+  - id: linux
+    env:
       - CGO_ENABLED=0
     main: ./cmd/secret_inject
     ldflags:
@@ -17,20 +15,41 @@ builds:
       - -X 'main.BuildDate={{ .Date }}'
     goos:
       - linux
-      - darwin
-      - windows
     goarch:
       - amd64
       - arm64
-    ignore:
-      - goos: windows
-        goarch: arm64
+
+  - id: darwin-arm64
+    env:
+      - CGO_ENABLED=1
+      - CC=/usr/bin/clang
+      - CGO_CFLAGS=-arch arm64
+      - CGO_LDFLAGS=-arch arm64
+    main: ./cmd/secret_inject
+    goos: [darwin]
+    goarch: [arm64]
+    ldflags:
+      - -s -w
+      - -X 'main.Version={{ .Version }}'
+      - -X 'main.GitCommit={{ .Commit }}'
+      - -X 'main.BuildDate={{ .Date }}'
+  - id: darwin-amd64
+    env:
+      - CGO_ENABLED=1
+      - CC=/usr/bin/clang
+      - CGO_CFLAGS=-arch x86_64
+      - CGO_LDFLAGS=-arch x86_64
+    main: ./cmd/secret_inject
+    goos: [darwin]
+    goarch: [amd64]
+    ldflags:
+      - -s -w
+      - -X 'main.Version={{ .Version }}'
+      - -X 'main.GitCommit={{ .Commit }}'
+      - -X 'main.BuildDate={{ .Date }}'
 
 archives:
   - formats: [tar.gz]
-    format_overrides:
-      - goos: windows
-        formats: [zip]
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_
       {{- if eq .Os "darwin" }}macOS

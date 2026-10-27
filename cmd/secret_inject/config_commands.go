@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -16,15 +17,18 @@ const configTemplate = `{
   "sources": {
     "doppler": {
       "project": "my-project",
-      "env": "dev"
+      "env": "dev",
+      "credential": {"kind":"stored", "name":"doppler-root"}
     },
     "onepassword": {
+      "credential": {"kind":"stored", "name":"onepassword-root"},
       "secrets": {
         "API_TOKEN": "op://Production/API/token",
         "DB_USER": "op://Production/Database/username"
       }
     },
     "bitwarden": {
+      "credential": {"kind":"stored", "name":"bitwarden-root"},
       "secrets": {
         "DB_PASSWORD": "382580ab-1368-4e85-bfa3-b02e01400c9f",
         "API_TOKEN": {
@@ -36,7 +40,7 @@ const configTemplate = `{
   },
   "storage": {
     "type": "keyring",
-    "allowed_backends": ["keychain", "secret-service", "wincred"]
+    "allowed_backends": ["NATIVE_BACKEND"]
   }
 }
 `
@@ -121,7 +125,7 @@ func initConfigFile(path string, force bool) (err error) {
 	if err := file.Truncate(0); err != nil {
 		return fmt.Errorf("truncating config template: %w", err)
 	}
-	if _, err := file.Write([]byte(configTemplate)); err != nil {
+	if _, err := file.Write([]byte(readConfigTemplate())); err != nil {
 		return fmt.Errorf("writing config template: %w", err)
 	}
 	if err := file.Sync(); err != nil {
@@ -226,5 +230,6 @@ func defaultEditorLauncher(command string, args []string, stdout, stderr io.Writ
 }
 
 func readConfigTemplate() string {
-	return configTemplate
+	backend := map[string]string{"darwin": "darwin-keychain", "linux": "linux-secret-service"}[runtime.GOOS]
+	return strings.ReplaceAll(configTemplate, "NATIVE_BACKEND", backend)
 }

@@ -7,14 +7,30 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestMain(m *testing.M) {
-	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
+	if len(os.Args) > 1 && os.Args[1] == "--child-fixture" {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			os.Exit(36)
+		}
+		os.Stdout.Write(data)
+		fmt.Fprintln(os.Stderr, "TARGET_STDERR_SENTINEL")
+		os.Exit(37)
+	}
+	if os.Getenv("SECRET_INJECT_TEST_RUN") == "1" {
+		os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr))
+	}
+	name := filepath.Base(os.Args[0])
 	if os.Getenv("SECRET_INJECT_FAKE_PROVIDER") == "1" && (name == "doppler" || name == "op") {
+		if marker := os.Getenv("SECRET_INJECT_PROVIDER_MARKER"); marker != "" {
+			if err := os.WriteFile(marker, []byte("called"), 0600); err != nil {
+				os.Exit(17)
+			}
+		}
 		if os.Getenv("SI_PROVIDER_FAIL") == "1" {
 			fmt.Fprintln(os.Stderr, "RAW_SECRET_SENTINEL")
 			os.Exit(9)
@@ -38,13 +54,14 @@ func TestMain(m *testing.M) {
 
 func commandFixture(t *testing.T, profiles bool) (string, string) {
 	t.Helper()
+	installProtectedFixture(t)
 	root := t.TempDir()
 	for _, name := range []string{"home", "cache", "state", "tmp", "bin"} {
 		if err := os.Mkdir(filepath.Join(root, name), 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for key, value := range map[string]string{"HOME": "home", "USERPROFILE": "home", "LOCALAPPDATA": "cache", "XDG_CACHE_HOME": "cache", "XDG_STATE_HOME": "state", "TMPDIR": "tmp", "TEMP": "tmp", "TMP": "tmp"} {
+	for key, value := range map[string]string{"HOME": "home", "XDG_CACHE_HOME": "cache", "XDG_STATE_HOME": "state", "TMPDIR": "tmp", "TEMP": "tmp", "TMP": "tmp"} {
 		t.Setenv(key, filepath.Join(root, value))
 	}
 	t.Setenv("SECRET_INJECT_FAKE_PROVIDER", "1")
@@ -54,9 +71,6 @@ func commandFixture(t *testing.T, profiles bool) (string, string) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"doppler", "op"} {
-		if runtime.GOOS == "windows" {
-			name += ".exe"
-		}
 		src, err := os.Open(exe)
 		if err != nil {
 			t.Fatal(err)
@@ -74,9 +88,12 @@ func commandFixture(t *testing.T, profiles bool) (string, string) {
 	}
 	t.Setenv("PATH", filepath.Join(root, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
 	cfg := map[string]any{
-		"storage":         map[string]string{"type": "file"},
+		"storage":         map[string]any{"type": "keyring", "allowed_backends": []string{fixtureBackend()}},
 		"source_sequence": []string{"doppler", "onepassword"},
-		"sources":         map[string]any{"doppler": map[string]string{"project": "test", "env": "dev"}, "onepassword": map[string]any{"secrets": map[string]string{"SERVICE_TOKEN": "op://synthetic-reference"}}},
+		"sources": map[string]any{
+			"doppler":     map[string]any{"project": "test", "env": "dev", "credential": map[string]string{"kind": "stored", "name": "work-root"}},
+			"onepassword": map[string]any{"credential": map[string]string{"kind": "from_source", "source": "doppler", "key": "OP_SERVICE_ACCOUNT_TOKEN"}, "secrets": map[string]string{"SERVICE_TOKEN": "op://synthetic-reference"}},
+		},
 	}
 	if profiles {
 		cfg["profiles"] = map[string]any{
@@ -129,6 +146,36 @@ func TestCommandValidationAndWriterFailures(t *testing.T) {
 type shortWriter struct{}
 
 func (shortWriter) Write(p []byte) (int, error) { return 0, nil }
+
+func TestUncertifiedFreshFetchIsRefusedBeforeProviderStartup(t *testing.T) {
+	path, root := commandFixture(t, true)
+	previous := fetchRemoteProvider
+	fetchRemoteProvider = nil
+	t.Cleanup(func() { fetchRemoteProvider = previous })
+	marker := filepath.Join(root, "provider-started")
+	t.Setenv("SECRET_INJECT_PROVIDER_MARKER", marker)
+	code, out, stderr := invoke("--config", path, "--profile", "task", "--output", "json")
+	if code != 1 || out != "" || !strings.Contains(stderr, "not certified") {
+		t.Fatalf("uncertified fetch was not refused: code=%d stderr=%q", code, stderr)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("an uncertified provider recipe executed")
+	}
+}
+
+func TestCacheHitDoesNotNeedInstalledProviders(t *testing.T) {
+	path, _ := commandFixture(t, true)
+	if code, _, stderr := invoke("--config", path, "--profile", "task"); code != 0 {
+		t.Fatal(stderr)
+	}
+	t.Setenv("PATH", "")
+	previous := fetchRemoteProvider
+	fetchRemoteProvider = nil
+	t.Cleanup(func() { fetchRemoteProvider = previous })
+	if code, _, stderr := invoke("--config", path, "--profile", "task"); code != 0 {
+		t.Fatal("cache hit executed provider preparation:", stderr)
+	}
+}
 
 func TestSourceChangesAndExpiryNeverReuseStaleCache(t *testing.T) {
 	path, _ := commandFixture(t, true)
@@ -201,7 +248,7 @@ func TestProfileSelectionRequiredBeforeStorage(t *testing.T) {
 func TestLegacyAndProfiledCommandFlows(t *testing.T) {
 	path, root := commandFixture(t, false)
 	code, out, stderr := invoke("--config", path, "--output", "json")
-	if code != 0 || stderr != "" || !strings.Contains(out, "BOOTSTRAP_SENTINEL") {
+	if code != 0 || stderr != "" || strings.Contains(out, "BOOTSTRAP_SENTINEL") || !strings.Contains(out, "FETCHED_SENTINEL") {
 		t.Fatalf("legacy export failed: %d %q", code, stderr)
 	}
 	if _, err := os.Stat(filepath.Join(root, "state", "secret_inject")); !os.IsNotExist(err) {

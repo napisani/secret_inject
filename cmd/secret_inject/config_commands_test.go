@@ -7,10 +7,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
- "slices"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/napisani/secret_inject/internal/config"
+	"github.com/napisani/secret_inject/internal/source"
+	"github.com/napisani/secret_inject/internal/storage"
 )
 
 func TestConfigInitUsesCLIOutput(t *testing.T) {
@@ -116,7 +119,7 @@ func TestCLIOutputFailures(t *testing.T) {
 }
 
 func TestConfigTemplateIsValidJSON(t *testing.T) {
-    t.Parallel()
+	t.Parallel()
 	data := readConfigTemplate()
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(data), &parsed); err != nil {
@@ -135,52 +138,52 @@ func TestConfigTemplateIsValidJSON(t *testing.T) {
 }
 
 func TestSplitCommandLine(t *testing.T) {
-    t.Parallel()
-    cases := []struct {
-        name string
-        input string
-        expected []string
-        wantErr bool
-    }{
-        {
-            name: "simple arguments",
-            input: "code -w",
-            expected: []string{"code", "-w"},
-        },
-        {
-            name: "quoted executable",
-            input: `"Visual Studio Code" --wait`,
-            expected: []string{"Visual Studio Code", "--wait"},
-        },
-        {
-            name: "quoted argument",
-            input: "vim -c 'set number'",
-            expected: []string{"vim", "-c", "set number"},
-        },
-        {
-            name: "unterminated quote",
-            input: "vim 'unterminated",
-            wantErr: true,
-        },
-    }
-    for _, tc := range cases {
-        t.Run(tc.name, func(t *testing.T) {
-            t.Parallel()
-            got, err := splitCommandLine(tc.input)
-            if tc.wantErr {
-                if err == nil {
-                    t.Fatal("expected parsing error")
-                }
-                return
-            }
-            if err != nil {
-                t.Fatal(err)
-            }
-            if !slices.Equal(got, tc.expected) {
-                t.Fatalf("got %q, want %q", got, tc.expected)
-            }
-        })
-    }
+	t.Parallel()
+	cases := []struct {
+		name     string
+		input    string
+		expected []string
+		wantErr  bool
+	}{
+		{
+			name:     "simple arguments",
+			input:    "code -w",
+			expected: []string{"code", "-w"},
+		},
+		{
+			name:     "quoted executable",
+			input:    `"Visual Studio Code" --wait`,
+			expected: []string{"Visual Studio Code", "--wait"},
+		},
+		{
+			name:     "quoted argument",
+			input:    "vim -c 'set number'",
+			expected: []string{"vim", "-c", "set number"},
+		},
+		{
+			name:    "unterminated quote",
+			input:   "vim 'unterminated",
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := splitCommandLine(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected parsing error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, tc.expected) {
+				t.Fatalf("got %q, want %q", got, tc.expected)
+			}
+		})
+	}
 }
 
 func TestInitConfigFileCreatesTemplate(t *testing.T) {
@@ -196,8 +199,16 @@ func TestInitConfigFileCreatesTemplate(t *testing.T) {
 		t.Fatalf("failed reading config: %v", err)
 	}
 
-	if string(data) != configTemplate {
-		t.Fatalf("config template mismatch\n got: %s\nwant: %s", string(data), configTemplate)
+	var parsed config.Config
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.ValidateNativeConfig(parsed.Storage); err != nil {
+		t.Fatal("template does not select one platform-native backend")
+	}
+	plan, err := source.PlanCredentials(parsed.Sources, parsed.SourceSequence)
+	if err != nil || len(plan) != 3 || len(parsed.Profiles) != 0 {
+		t.Fatal("template must have bound sources without inventing a default profile")
 	}
 
 	info, err := os.Stat(cfgPath)
@@ -205,11 +216,9 @@ func TestInitConfigFileCreatesTemplate(t *testing.T) {
 		t.Fatalf("stat failed: %v", err)
 	}
 
-	if runtime.GOOS != "windows" {
-		perm := info.Mode().Perm()
-		if perm != 0o600 {
-			t.Fatalf("expected permissions 0600, got %o", perm)
-		}
+	perm := info.Mode().Perm()
+	if perm != 0o600 {
+		t.Fatalf("expected permissions 0600, got %o", perm)
 	}
 
 	if err := initConfigFile(cfgPath, false); err == nil {
@@ -222,9 +231,6 @@ func TestInitConfigFileCreatesTemplate(t *testing.T) {
 }
 
 func TestInitConfigFileForceRestrictsExistingPermissions(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX file permissions")
-	}
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)

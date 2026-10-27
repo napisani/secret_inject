@@ -1,527 +1,304 @@
 # secret_inject
 
-A CLI tool for fetching secrets from external secret managers, caching them locally, and injecting them as environment variables.
+Compose secrets and local dotenv files into shell exports, JSON, env-file text,
+or the environment of a command. Supported platforms are Linux and macOS.
 
-Currently supports:
-- **Doppler** secret management (via `doppler` CLI)
-- **1Password** secret retrieval (via `op` CLI and service accounts)
-- **Bitwarden Secrets Manager** (via `bws` CLI access tokens)
-- **Keyring** storage (macOS Keychain, Windows Credential Manager, Linux secret service, etc.)
-- **File** storage (development-only plaintext files in your user cache directory)
+## Development status: breaking migration
 
-## Features
+This branch implements private credential storage and unattended resolution.
+**Fresh remote fetches are currently refused:** no exact provider release has
+completed the required conformance matrix. Source-audited candidates are not
+certified. There is no runtime bypass, personal-session fallback, or automatic
+login. The release workflow refuses to publish until all three providers have
+certified releases. See [conformance requirements](docs/unattended-conformance.md).
+Local-only profiles, inspection, and local-only `run` work independently.
 
-- 🔐 Secure secret caching with keyring integration
-- ⏱️ Configurable cache TTL (time-to-live)
-- 🔄 Force refresh option to bypass cache
-- 📤 Multiple output formats (shell, JSON, env file)
-- Named workflow profiles with include/exclude patterns and exact key renaming
-- Values-free missing-include checks and private rotating debug logs
-- Source-scoped caches shared across profiles using the same sources
-- ✅ Proper error handling (no panics!)
-- 🧪 Unit tested
-- 🛠️ Built-in config helper (`secret_inject config`)
-- 📦 Clean package structure
+Native adapters are implemented for macOS Keychain and Linux Secret Service;
+compiling them does not establish native conformance.
+Do not activate the managed configuration migration before completing its setup
+and release gates.
 
-## Installation
+## Build and check
 
-### Build from source
-```bash
+Go 1.25 or newer:
+
+```sh
 make build
-```
-
-### Install
-```bash
+make test
 make install
+# From the monorepo root:
+make check FILTER=secret-inject
 ```
 
-## Usage
-
-### Basic Usage
-```bash
-# Fetch secrets and output as shell exports
-./secret_inject --config ~/.config/secret_inject.json
-
-# Force refresh (ignore cache)
-./secret_inject --force
-
-# Output as JSON
-./secret_inject --output json
-
-# Output as env file format
-./secret_inject --output env
-
-# Set custom cache TTL
-./secret_inject --ttl 30m
-
-# Clean cached secrets
-./secret_inject --clean
-
-# Enable debug logging
-./secret_inject --debug
-
-# Show version
-./secret_inject --version
-```
-
-### CLI Flags
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--config` | `~/.config/.secret_inject.json` | Config file path |
-| `--clean` | `false` | Clean all scoped caches in the selected backend; no profile required |
-| `--debug` | `false` | Write a private rotating debug log; errors still use stderr |
-| `--force` | `false` | Force refresh, ignore cache |
-| `--ttl` | `1h` | Cache TTL duration (e.g., '1h', '30m', '24h') |
-| `--output` | `shell` | Output format: shell, json, env |
-| `--profile` | - | Named workflow profile; required when profiles are configured |
-| `--version` | - | Print version information |
- 
-### Config Helper
-
-Bootstrap or edit your config file without copying templates manually:
-
-```bash
-# Create a new config (fails if the file already exists)
-secret_inject config init --config ~/.config/.secret_inject.json
-
-# Overwrite an existing file (enforces owner-only POSIX permissions)
-secret_inject config init --force --config ~/.config/.secret_inject.json
-
-# Open the config in your preferred editor ($EDITOR or vi)
-secret_inject config edit --config ~/.config/.secret_inject.json
-```
-
-Use `--editor` to override the editor for a single invocation (for example `--editor "code --wait"`).
-Both config commands support `--help` and reject positional arguments. Help and
-errors use stderr; config creation confirmations use stdout.
+macOS builds that use native storage require CGO and the Apple SDK. Release
+archives build both macOS architectures natively with CGO enabled. Linux builds
+do not require CGO. Installed skill examples are a separate `agent/go.mod`
+module and are not compiled as part of the CLI.
 
 ## Configuration
 
+The default path is `~/.config/.secret_inject.json`. `config init` writes a
+profile-free template with private bindings and exactly one platform backend;
+`config edit` uses `$EDITOR` or `--editor` without executing a shell command.
 
-### Config File Format
+```sh
+secret_inject config init --config ./secrets.json
+secret_inject config edit --config ./secrets.json
+```
+
+Example with synthetic identifiers, portable between macOS and Linux:
+
 ```json
 {
-  "source_sequence": ["doppler", "onepassword", "bitwarden"],
+  "storage": {"type":"keyring", "allowed_backends":["darwin-keychain","linux-secret-service"]},
+  "source_sequence": ["doppler", "onepassword"],
   "sources": {
     "doppler": {
-      "env": "dev",
-      "project": "my-project"
+      "project":"example", "env":"dev",
+      "credential":{"kind":"stored", "name":"work-root"}
+    },
+    "onepassword": {
+      "credential":{
+        "kind":"from_source", "source":"doppler",
+        "key":"OP_SERVICE_ACCOUNT_TOKEN"
+      },
+      "secrets":{"SERVICE_TOKEN":"op://example/item/field"}
     }
   },
-  "storage": {
-    "type": "keyring",
-    "allowed_backends": ["keychain"],
-    "password": "optional-master-password"
-  }
-}
-```
-
-### Source Options
-
-Sources are fetched in `source_sequence` order. Secrets from earlier sources are exported as environment variables when invoking later source CLIs, so you can chain dependencies (for example, `OP_SERVICE_ACCOUNT_TOKEN` coming from Doppler before 1Password runs).
-
-#### Doppler
-Configured identically to previous releases. Provide the project and config name to fetch with the `doppler` CLI:
-
-```json
-{
-  "sources": {
-    "doppler": {
-      "project": "my-project",
-      "env": "dev"
-    }
-  }
-}
-```
-
-#### 1Password (`op` CLI)
-Requirements:
-- Install the [1Password CLI](https://developer.1password.com/docs/cli) and ensure `op` is on your `PATH`.
-- Authenticate non-interactively using a service account token (`OP_SERVICE_ACCOUNT_TOKEN`) or an existing desktop session, per the [1Password docs](https://developer.1password.com/docs/cli/sign-in-overview).
-
-Define a mapping from environment variable names to secret references:
-
-```json
-{
-  "sources": {
-    "onepassword": {
-      "secrets": {
-        "API_TOKEN": "op://Production/API/token",
-        "DB_USER": "op://Production/Database/username"
-      }
-    }
-  }
-}
-```
-
-Each value must be a valid secret reference (vault/item[/section]/field). The CLI resolves the references at runtime, so secrets remain outside the config file.
-
-#### Bitwarden Secrets Manager (`bws` CLI)
-Requirements:
-- Install the [Bitwarden Secrets Manager CLI](https://bitwarden.com/help/cli/secrets-manager-cli/) (`bws`).
-- Export a machine account access token (`BWS_ACCESS_TOKEN`) before running `secret_inject`.
-
-Secrets can be referenced directly by ID or resolved by key within an optional project:
-
-```json
-{
-  "sources": {
-    "bitwarden": {
-      "secrets": {
-        "DB_PASSWORD": "382580ab-1368-4e85-bfa3-b02e01400c9f",
-        "API_TOKEN": {
-          "key": "api-token",
-          "project_id": "e325ea69-a3ab-4dff-836f-b02e013fe530"
-        }
-      }
-    }
-  }
-}
-```
-
-Use the string form when you know the secret's UUID. The object form lets you locate a secret by its `key` inside an optional Bitwarden project. If a project is not specified, all accessible secrets are searched.
-
-> Each configured source checks that its CLI is installed when `secret_inject` starts. A missing CLI is an error: `secret_inject` exits without fetching secrets from any source. To run without a provider, remove its entry from `sources` or set it to `null`.
-
-### Workflow profiles
-
-Add `profiles` alongside `sources` and `storage` in your config:
-
-```json
-{
   "profiles": {
-    "shell": {
-      "exclude": ["OP_SERVICE_ACCOUNT_TOKEN", "BWS_*"],
-      "overwrite": false
+    "shell": {"exclude":[], "overwrite":false},
+    "task": {
+      "include":["SERVICE_*"],
+      "rename":{"SERVICE_TOKEN":"API_KEY"}
     },
-    "deploy": {
-      "include": ["SERVICE_*", "OPTIONAL_TOKEN"],
-      "rename": { "SERVICE_TOKEN": "API_KEY" }
+    "project-only": {
+      "exclude":[], "remote_sources":false,
+      "env_files":["*.env", "*.env.local"]
     }
   }
 }
 ```
 
-```bash
-secret_inject --profile shell
-secret_inject --profile deploy --output json
-secret_inject profile check --profile deploy
-secret_inject profile check --profile deploy --force --debug
+`secret_inject` selects `darwin-keychain` on macOS and `linux-secret-service` on Linux.
+List both in `allowed_backends` to share a config across systems, or list only
+the intended host's backend. List order does not affect selection. A missing
+host backend, unknown backend, duplicate entry, or configured storage password
+is rejected. Native access failure never falls back to another backend.
+Local-only profiles need no storage or provider configuration.
+
+### Private authentication
+
+All remote export/check/run operations require explicit bindings. Ambient
+`DOPPLER_TOKEN`, personal 1Password sessions, and ambient `BWS_ACCESS_TOKEN` are
+not authentication fallbacks.
+
+```sh
+secret_inject store prepare --config ./secrets.json
+secret_inject credential set work-root --provider doppler --config ./secrets.json
+secret_inject credential list --config ./secrets.json
+secret_inject credential remove work-root --config ./secrets.json
 ```
+
+- Only `store prepare` and enrollment may request OS interaction. Normal exports,
+  checks, `run`, credential metadata/removal, and cache operations do not create
+  or unlock native containers or invoke a native prompt.
+- `set` requires terminal input, reads a single-line token without echo, and
+  upserts by default. No token argument, stdin-pipe mode, environment-value
+  enrollment, or raw-value read/export command exists.
+- Credential names have 1–128 ASCII alphanumeric/underscore/hyphen/dot characters,
+  starting with an alphanumeric character. They are identifiers, not paths.
+- Existing names cannot change provider kind through replacement. Metadata and
+  receipts contain only name/provider fields. Removal deletes the local record,
+  not the vendor's token.
+- `store prepare` can create/unlock/request OS authorization without replacing
+  credentials or changing their revision merely for preparation. Authorization
+  may still be item-specific or change later.
+- A `from_source` binding names an exact original output key in an earlier enabled
+  source. That entry is extracted into a private in-memory channel **before**
+  workload merge, cache publication, filtering, renaming, or collision logging.
+  Missing required private entries fail; profile include tolerance is unrelated.
+- Only the consuming provider receives its private credential. Unmarked copies
+  or equal values under different keys are not detected automatically.
+
+One source instance per provider is supported. Doppler uses `project`/`env`;
+1Password maps names to `op://` references. Bitwarden's `secrets` values accept
+an ID string, or an object containing `id`, or `key` with optional `project_id`.
+Later sources overwrite duplicate ordinary workload names.
+
+### Provider process isolation
+
+Fresh fetches use a private, token-free provider configuration before even a
+version probe. Personal CLI files are not imported. Competing ambient auth
+selectors are removed from the provider child only; target inheritance is not
+modified. Credentials are supplied only to the selected provider's fetch.
+
+Per-command provider execution retains a 30-second limit, captures output
+internally, and never reads target stdin. Caller cancellation propagates; there
+is no additional aggregate fetch-timeout flag or vendor login recovery.
+
+Documented proxy/CA/endpoint environment controls remain available. In particular,
+`BWS_SERVER_URL` is validated into the private TOML profile's `server_base` so it
+cannot bypass the state-opt-out profile. No new endpoint source-schema fields
+exist. Changing external endpoint/provider context still requires `--force`.
+
+## Profiles and local env files
 
 - Each profile has exactly one `include` or `exclude` array. Empty includes select
-  nothing; empty exclusions select everything. Profiles reject unknown/duplicate
-  fields, nulls, invalid patterns, and duplicate explicit rename destinations.
-- Rules match original names case-sensitively; `*` matches any sequence, including
-  empty. No `?`, bracket classes, regex, or pattern-based renaming.
-- Missing rules are tolerated during export. `--debug` records unmatched include
-  and exclude rules by name. `profile check` reports unmatched include rules as
-  JSON: `{"profile":"deploy","missing_includes":["OPTIONAL_TOKEN"]}`. A pattern
-  is missing only when it matches nothing. Exclude profiles report `[]`.
-- Check exits **0** for no missing includes, **2** for missing includes, and **1**
-  for operational/configuration errors. It uses the normal TTL; `--force` checks
-  live providers and updates the full cache. It never prints secret values.
-- Selection happens before exact renaming, with no chained renames. An explicit
-  rename wins over an unchanged selected destination; the debug log records both
-  original names. Absent or excluded rename origins are skipped and debug-logged.
-- `overwrite` defaults to `true`. When false, generated POSIX shell code preserves
-  any variable already set in the consuming shell, including empty or unexported
-  variables. JSON/env still contain fetched values: they cannot enforce a
-  consumer's overwrite policy. Excluded variables are **not unset**.
-- All output formats require portable destination identifiers, such as `API_KEY`.
-- If at least one profile exists, exports require an explicit `--profile`.
-  Without profiles, existing full-set export behavior remains available.
-  `config init` deliberately keeps generating the profile-free template.
+  nothing; empty exclusions select everything. Matching is case-sensitive and
+  supports only `*` (including an empty match), not regex or bracket patterns.
+- Exact renames use original names and do not chain. Explicit renames beat
+  unchanged destinations; duplicate explicit destinations are invalid.
+- Missing includes are tolerated. `profile check --profile NAME` resolves values
+  and returns `{"profile":"NAME","missing_includes":[...]}` without values:
+  status 0 complete, 2 missing includes, 1 operational failure.
+- Shell `overwrite` defaults true. False preserves existing shell variables,
+  including empty/unexported ones; JSON/env cannot enforce that consumer policy.
+  Excluded/absent names never unset inherited variables.
+- If profiles exist, exports require `--profile`. Profile-free export remains
+  available with the same private-auth requirements. `run` always requires an
+  explicit existing profile.
+- `remote_sources:false` skips providers and remote storage completely.
+- `env_files` patterns are basename-only and evaluated in the current directory.
+  Files are sorted within each pattern, processed once, and overlaid in pattern
+  order. `*.env` then `*.env.local` puts local overrides last. No subdirectory
+  search, symlink/nonregular-file input, or shell execution is allowed.
+- Dotenv files are always read fresh and never cached. Local values override
+  ordinary remote values before projection, but cannot bootstrap remote auth.
 
-### Project-local env files
+## Run a command
 
-Profiles can add local dotenv files and choose whether to use configured remote
-sources:
+Linux/macOS only:
 
-```json
-{
-  "profiles": {
-    "shell": { "exclude": [] },
-    "project-only": {
-      "exclude": [],
-      "remote_sources": false,
-      "env_files": ["*.env", "*.env.local"]
-    },
-    "project": {
-      "exclude": [],
-      "env_files": ["*.env", "*.env.local"]
-    }
-  }
-}
+```sh
+secret_inject run --profile task -- executable --literal-target-flag
+secret_inject run --config ./secrets.json --profile project-only -- ./tool
 ```
 
-```bash
-secret_inject --profile project-only
-secret_inject --profile project --output json
-secret_inject profile check --profile project-only
+The literal `--` separator is mandatory. No task registry, inheritance flags,
+restricted mode, child supervisor, or shell fallback exists.
+
+`run` inherits the **entire parent environment** and overlays selected final
+values, regardless of shell `overwrite`. Missing includes can therefore retain
+ambient fallback values; exclusions do not remove parent variables.
+
+The initial executable is resolved with ordinary Go parent-PATH/explicit-path
+lookup **before** resolution. A selected `PATH` reaches the target but cannot
+reselect the initial executable. Go's implicit-current-directory refusal remains.
+This is not inode binding or executable authentication.
+
+Preparation does not consume target stdin. The CLI finalizes native sessions,
+locks, provider temporary contexts, diagnostics, and signal handling, then uses
+POSIX exec. Target stdin/stdout/stderr/status/signals are native and unchanged.
+
+New-command wrapper errors use versioned JSON on stderr with fixed messages:
+usage 2, target missing 127, cannot execute 126, other preparation failures 1,
+SIGINT/SIGTERM preparation cancellation 130/143. Once exec succeeds, target output
+is arbitrary bytes and is not a wrapper receipt or a redacted stream.
+
+## Inspect without resolving
+
+```sh
+secret_inject profile list
+secret_inject profile describe --profile task
 ```
 
-- `remote_sources` defaults to `true`. When false, no remote providers are
-  initialized or fetched, and no remote cache or keyring is opened. A local-only
-  invocation does not require a `storage` block.
-- `env_files` defaults to an empty array. Patterns match filenames in the process's
-  current directory, not the config directory. Parent paths and subdirectory
-  patterns are rejected; subdirectories are not searched and symlinks are refused.
-- Patterns are processed in configured order, with filenames sorted within each
-  pattern; a file is read only once. The example loads `.env` and `app.env` before
-  `.env.local` and `app.env.local`. It does not match `.env.production` or
-  `.env.example`. No matches are allowed and produce no local values.
-- Local files are always read fresh and never cached. Their values override remote
-  values; later files override earlier files. Selection and renaming happen after
-  composition. `--force` affects only remote fetching.
-- Files are parsed as dotenv data, never sourced or executed. Dotenv quoting,
-  comments, multiline values, and references to earlier variables in the same file
-  are supported. These references do not use shell variables or other files.
-  Unreadable or malformed matched files fail without printing their contents.
+These return versioned JSON. List names are sorted, with no invented default.
+Describe returns selection/rename policy, `shell_overwrite`, remote policy,
+declared env-file patterns, provider kinds/order, and
+`resolution:{"kind":"not_evaluated"}`. It omits bindings, private dependency keys,
+provider references/arguments, storage settings, actual resolved names, and values.
+Neither command initializes storage/providers, probes binaries, reads/matches
+local dotenv files, or checks credential readiness. Remote-enabled describe
+rejects invalid applicable provider names/order; list/local-only describe ignore
+unused remote declarations.
 
-**Profiles are not access control.** Remote-enabled profiles still fetch and cache
-all configured remote sources, including bootstrap credentials, before output
-selection. Local files do not supply bootstrap credentials to remote providers.
-A local-only export emits only file values but does not unset variables already
-present in the consuming shell. This is not an agent execution or sandboxing
-interface.
+## Exports, cache, and debug
 
-### Cache identity and versioning
-
-Caches are keyed by source definitions and effective source order, not by profile,
-config path, output format, or TTL. Later sources still overwrite duplicate names.
-Remote-enabled profiles reuse the full remote cache; changing sources creates a
-new scope. Local file values are never part of this cache.
-External CLI login/token/account changes cannot be detected: use `--force` after
-changing them. Provider-side edits otherwise become visible after TTL expiry.
-
-Each backend stores a `cache-version` sentinel. If it is missing, unreadable, or
-different from the current version, the tool discards its scoped and old unscoped
-cache entries without decoding them, then writes the current version. No cached
-data is migrated. Stop old binaries before upgrading so they cannot recreate old
-entries. A failed cache reset stops the operation.
-
-`--clean` discards cache entries directly without checking their version, then
-writes the current sentinel. It preserves unrelated data and does not require
-installed provider CLIs. It cannot be
-combined with `--profile`. It does not clean unopened keyring backends or prevent
-another process from repopulating a cache concurrently.
-
-### Debug logging
-
-`--debug` writes structured name-only diagnostics to
-`$XDG_STATE_HOME/secret_inject/debug.log`, falling back to
-`~/.local/state/secret_inject/debug.log`. The active file rotates at 5 MiB with
-one `.1` backup. Directories are private (`0700`), files are `0600`, with equivalent
-current-user access restrictions on Windows. Symlink/nonregular targets are refused.
-
-Only one debug invocation may hold the log lock; another fails immediately.
-Open/write/rotation/flush/close failures also stop result output rather than
-silently losing the requested diagnostics. Non-debug runs create no log files.
-Logs cover cache/provider state, missing rules, skipped renames and collisions;
-values, provider arguments, references, raw provider output and environment dumps
-are never logged. Provider failures report operation/status instead of upstream
-output. Stdout remains result data only; terminal password prompts use stderr.
-
-### Storage Options
-
-#### Keyring Storage (Recommended)
-Uses OS-native secure storage:
-
-```json
-{
-  "storage": {
-    "type": "keyring",
-    "allowed_backends": ["keychain", "secret-service", "wincred"],
-    "password": "optional-master-password"
-  }
-}
+```sh
+secret_inject --profile shell
+secret_inject --profile task --output json
+secret_inject --profile task --output env --force --ttl 30m
+secret_inject --clean
+secret_inject --profile task --debug
 ```
 
-**Available backends:**
-- `keychain` - macOS Keychain
-- `secret-service` - Linux Secret Service (GNOME/KDE)
-- `wincred` - Windows Credential Manager
-- `kwallet` - KDE Wallet
-- `keyctl` - Linux kernel keyring
-- `pass` - Pass password manager
-- `file` - Encrypted file (requires password)
+Shell output is POSIX syntax; use a compatible shell such as Bash or Zsh.
+For an intentional current-shell integration, capture exports, check the status,
+then evaluate only a successful result. Prefer `run` when exported shell text is
+unnecessary. Config helper confirmations are not secret exports.
 
-#### File Storage (Development Only)
-⚠️ **Not recommended for production** — stores complete remote snapshots in plaintext
-under `os.UserCacheDir()/secret_inject/` (for example `~/.cache/secret_inject/`
-on Linux or `~/Library/Caches/secret_inject/` on macOS). This is cache storage;
-profile `env_files` inputs are separate and are always read fresh.
+Complete ordinary remote snapshots are scoped by source definitions, effective
+order, and binding/extraction declarations—not profile, config path, output, TTL,
+or token bytes. One native engine stores snapshots, bootstrap records, and
+metadata with generation-named chunks and manifest publication. Credential
+mutation advances the store-wide revision before payload mutation. Cache reads,
+publication, and final handoff are fenced; changed contexts fail without retry.
+No native multi-record transaction or retroactive process revocation is claimed.
 
-```json
-{
-  "storage": {
-    "type": "file"
-  }
-}
+`--clean` discards workload snapshots, including owned legacy cache entries,
+without deleting credentials/revision. It does not need provider executables.
+Legacy file-cache cleanup remains available solely for migration, without
+payload decoding, credential import, or interactive password recovery.
+
+Debug logs are private and value-free at `$XDG_STATE_HOME/secret_inject/debug.log`
+(or `~/.local/state/secret_inject/debug.log`), rotating at 5 MiB with one backup.
+They contain selection/provider/cache metadata, never values, provider arguments,
+references, raw native/provider errors, or environment dumps. Requested diagnostic
+or output failures stop delivery. Non-debug invocations create no debug logs.
+
+## Breaking migration checklist
+
+1. Stop old binaries and keep the old configuration available for explicit cleanup.
+2. Allow the host's native backend, or both for a portable config. Remove storage
+   passwords and unsupported backends.
+3. Explicitly prepare the store and enroll named automation credentials through
+   the terminal. No ambient credentials are imported automatically.
+4. Bind every enabled source and classify downstream private bootstrap keys.
+5. Add/select profiles. Review config-only descriptions; these are not access
+   control or a preview of resolved availability.
+6. Explicitly clean old caches/exports and remove duplicated ambient tokens.
+   Consider vendor rotation; local deletion does not revoke a vendor token.
+7. Complete conformance/release gates before activating the managed migration.
+
+The managed personal/work configs use separate Doppler record names and allow
+both native backends. Home Manager links the selected config without rewriting it;
+`secret_inject` selects the backend for the running system. Source edits do not
+enroll credentials, clear live data, or activate the configuration.
+
+## Security boundary
+
+This reduces accidental exposure, not same-user access or agent containment.
+Same-user programs can retrieve/debug credentials or substitute provider binaries.
+A target receiving workload secrets can print, store, or transmit them. Full
+inheritance retains any legacy ambient token copies. Profiles are projections,
+not provider access-control boundaries. CLI providers necessarily receive their
+own private credentials. Go strings are not securely zeroized.
+
+Config/reference names may themselves be sensitive: keep configuration private.
+Persisted secret text must be representable without JSON rewriting; invalid UTF-8
+is rejected. Use explicit vendor rotation and the shortest practical workload TTL.
+
+See the [feature wishlist](docs/feature-wishlist.md) for unimplemented directions
+such as conversion, additional providers, and multiple instances per provider.
+
+## Temporary managed-host migration wizard
+
+Run the one-time personal/work host migration from a full monorepo checkout:
+
+```sh
+bash pub/secret_inject/scripts/migrate-private-credentials.sh
 ```
 
-## Integration with Shell
+This host-specific helper requires Go, Python 3, and the certified Doppler CLI.
+It stops before live setup unless the native/provider release gates pass.
+It guides terminal-only enrollment and checks warm-cache reuse without provider
+executables on PATH. Merge and Nix activation remain manual.
 
-### Bash/Zsh
-Add to your `~/.bashrc` or `~/.zshrc`:
-
-```bash
-# Load secrets from secret_inject
-load_secrets() {
-  OUTPUT=$(secret_inject)
-  RESULT=$?
-  if [ $RESULT -eq 0 ]; then
-    eval "$OUTPUT"
-    echo "✅ Secrets loaded successfully"
-  else
-    echo "❌ Failed to load secrets:" >&2
-    echo "$OUTPUT" >&2
-    return 1
-  fi
-}
-
-# Auto-load on shell start (optional)
-# load_secrets
-```
-
-If your config declares profiles, change the invocation above to
-`secret_inject --profile shell` (using your chosen profile name).
-
-### Other shells
-
-Shell output is POSIX syntax: do not evaluate it in fish, PowerShell, or cmd.exe.
-JSON and env output are available for integrations, but native export syntax for
-those shells is not implemented.
-
-## Development
-
-### Project Structure
-```
-secret_inject/
-├── cmd/
-│   └── secret_inject/     # Main CLI entry point
-├── internal/
-│   ├── config/           # Configuration parsing
-│   ├── secret/           # Secret data structures
-│   ├── source/           # Secret source implementations
-│   ├── storage/          # Cache storage backends
-│   └── output/           # Output formatters
-├── go.mod
-├── Makefile
-└── README.md
-```
-
-### Running Tests
-```bash
-make test
-```
-
-Installed skill reference examples are isolated by `agent/go.mod`; they contain
-placeholder imports and are not part of the CLI module. Run checks from this
-project's root (or `make check FILTER=secret-inject` from the monorepo root).
-The installed skill files do not need modification to keep Go checks working.
-
-To exercise the profile matcher against an independent pattern implementation:
-
-```bash
-go test ./internal/profile -run='^$' -fuzz=FuzzProfileStarMatching -fuzztime=10s
-```
-
-### Building
-```bash
-# Build binary
-make build
-
-# Clean build artifacts
-make clean
-
-# Install to $GOPATH/bin
-make install
-```
-
-## Security Considerations
-
-### Storage Security
-
-- **Keyring storage (Recommended)**: Uses OS-native secure storage (macOS Keychain, Windows Credential Manager, Linux Secret Service)
-- **File storage**: ⚠️ **WARNING** - Stores secrets in **plaintext** on disk. Use **only for development**.
-
-### File Permissions
-
-The tool automatically enforces secure file permissions:
-
-- **Cache files**: Created with `0600` (read/write for owner only)
-- **Private cache/debug directories**: Restricted to the current user
-- **Config files**: Set permissions yourself (`chmod 600` on POSIX systems)
-
-`--debug` records values-free selection, provider and cache diagnostics in the
-private log file, not stderr.
-
-### Special Character Handling
-
-The tool properly escapes secrets containing special characters to prevent injection vulnerabilities:
-
-#### Shell Export Format
-Uses POSIX-compliant single-quote escaping. Secrets are wrapped in single quotes with embedded quotes escaped as `'\''`:
-```bash
-export API_KEY='abc'\''def'  # For secret: abc'def
-```
-
-#### Env File Format  
-Escapes special characters in `.env` file format:
-- Backslashes: `\` → `\\`
-- Quotes: `"` → `\"`
-- Newlines: `\n` → `\\n`
-- Tabs: `\t` → `\\t`
-- Dollar signs: `$` → `\$`
-
-Example:
-```bash
-# Secret with newline and quote
-API_KEY="line1\\nline2\\\"quoted\\\""
-```
-
-### Best Practices
-
-1. **Use keyring storage** for any production or sensitive environments
-2. **Secure your config file** with appropriate permissions: `chmod 600 ~/.config/.secret_inject.json`
-3. **Rotate secrets regularly** and use `--force` to refresh immediately
-4. **Monitor cache TTL** - shorter TTLs reduce exposure window but increase API calls
-5. **Enable debug mode** during troubleshooting to inspect names and cache/provider state: `--debug`
-6. **Environment isolation** - use separate config files for different environments (dev/staging/prod)
-7. **Review selection** - use `profile check --profile NAME` for missing includes, and remember profiles do not restrict fetching or caching
-
-### Limitations
-
-Due to Go's string immutability and memory management:
-- Secrets are stored in memory as regular strings (cannot be securely zeroed)
-- Use the shortest practical TTL to minimize memory exposure
-- Restart the process periodically if handling highly sensitive secrets
-
-## Roadmap
-
-See the [feature wishlist](docs/feature-wishlist.md) for the broader direction
-and open design questions around source composition, shell environments,
-agent use, local env files, and format conversion.
-
-Future enhancements:
-- [ ] AWS Secrets Manager support
-- [ ] HashiCorp Vault support
-- [ ] Azure Key Vault support
-- [x] Secret filtering by star pattern in named profiles
-- [x] Exact secret name transformation in named profiles
-- [ ] Direct command execution mode (`secret_inject run -- command`)
-
-## Contributing
-
-Contributions welcome! Please ensure:
-- Tests pass (`make test`)
-- Code builds cleanly (`make build`)
-- Follow existing code style
+Private choices and config backups stay outside the checkout at
+`$XDG_STATE_HOME/secret_inject/migration`, defaulting to
+`~/.local/state/secret_inject/migration`. No provider token enters the wizard's
+dotenv state. Remove this temporary helper after the hosts have migrated.
 
 ## License
 
-MIT License - see LICENSE file for details
-
+MIT; see LICENSE.

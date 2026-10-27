@@ -14,6 +14,7 @@ type DopplerConfig struct {
 }
 
 type Doppler struct {
+	command providerCommand
 	config  *DopplerConfig
 	enabled bool
 }
@@ -53,7 +54,7 @@ func (s *Doppler) Init(raw json.RawMessage) error {
 
 func (s *Doppler) GetAllSecrets(previous *secret.Secrets) (*secret.Secrets, error) {
 	env := buildCommandEnv(previous)
-	output, err := runCLICommand(
+	output, err := sourceCommand(s.command)(
 		"doppler",
 		env,
 		"--project",

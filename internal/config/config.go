@@ -19,8 +19,8 @@ type Config struct {
 	Profiles       profile.Profiles           `json:"profiles"`
 }
 
-// StorageConfig selects where fetched secrets are cached. AllowedBackends and
-// Password apply only to the keyring type.
+// StorageConfig selects the shared credential and workload store.
+// AllowedBackends may list both native backends; only the host's backend is used.
 type StorageConfig struct {
 	Type            string   `json:"type"`
 	AllowedBackends []string `json:"allowed_backends"`

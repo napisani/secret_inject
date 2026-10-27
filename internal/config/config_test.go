@@ -153,7 +153,7 @@ func TestReadConfigDecodesStorage(t *testing.T) {
 	content := `{
 		"storage": {
 			"type": "keyring",
-			"allowed_backends": ["keychain"],
+			"allowed_backends": ["darwin-keychain"],
 			"password": "pw"
 		}
 	}`
@@ -167,7 +167,7 @@ func TestReadConfigDecodesStorage(t *testing.T) {
 		t.Fatalf("ReadConfig failed: %v", err)
 	}
 	got := cfg.Storage
-	if got.Type != "keyring" || len(got.AllowedBackends) != 1 || got.AllowedBackends[0] != "keychain" || got.Password != "pw" {
+	if got.Type != "keyring" || len(got.AllowedBackends) != 1 || got.AllowedBackends[0] != "darwin-keychain" || got.Password != "pw" {
 		t.Fatalf("unexpected storage config: type=%q backends=%v", got.Type, got.AllowedBackends)
 	}
 }

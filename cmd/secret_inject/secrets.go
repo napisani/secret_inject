@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"sort"
 
@@ -13,21 +14,98 @@ import (
 	"github.com/napisani/secret_inject/internal/storage"
 )
 
-func loadSnapshot(cfg *config.Config, args Args, selected *profile.Profile, debug *diagnostics.Session) (*secret.Secrets, error) {
-	snapshot := secret.New()
-	if selected.RemoteSources() {
-		store, err := storage.Get(cfg.Storage)
+var errResourceFinalization = errors.New("preparation finalization failed")
+var openProtectedStore = storage.OpenNative
+var fetchRemoteProvider source.ProviderFetch
+
+type resolvedSnapshot struct {
+	Values   *secret.Secrets
+	store    *storage.RecordStore
+	revision string
+}
+
+func (r *resolvedSnapshot) Close() error {
+	if r.store == nil {
+		return nil
+	}
+	err := r.store.Close()
+	r.store = nil
+	if err != nil {
+		return errors.Join(errResourceFinalization, err)
+	}
+	return nil
+}
+func (r *resolvedSnapshot) Finish(ctx context.Context) error {
+	var err error
+	if r.store != nil {
+		err = r.store.CheckRevision(ctx, r.revision)
+	}
+	return errors.Join(err, r.Close(), ctx.Err())
+}
+
+func loadSnapshot(ctx context.Context, cfg *config.Config, args Args, selected *profile.Profile, debug *diagnostics.Session) (_ *resolvedSnapshot, err error) {
+	result := &resolvedSnapshot{Values: secret.New()}
+	defer func() {
 		if err != nil {
-			return nil, errors.New("cache backend unavailable")
+			err = errors.Join(err, result.Close())
 		}
-		debug.Record(diagnostics.Event{Kind: diagnostics.StorageProgress, Operation: "initialize", State: "started"})
-		if err := store.Initialize(); err != nil {
-			return nil, errors.New("cache initialization failed")
-		}
-		debug.Record(diagnostics.Event{Kind: diagnostics.StorageProgress, Operation: "initialize", State: "completed"})
-		snapshot, err = loadMerged(cfg, args, store, debug)
+	}()
+	if selected.RemoteSources() {
+		plan, err := source.PlanCredentials(cfg.Sources, cfg.SourceSequence)
 		if err != nil {
 			return nil, err
+		}
+		if err := storage.ValidateNativeConfig(cfg.Storage); err != nil {
+			return nil, err
+		}
+		scope, err := storage.SourceScope(cfg.Sources, cfg.SourceSequence)
+		if err != nil {
+			return nil, errors.New("invalid source configuration")
+		}
+		result.store, err = openProtectedStore(ctx, cfg.Storage, storage.Unattended)
+		if err != nil {
+			return nil, err
+		}
+		var hit bool
+		if !args.Force {
+			cached, found, err := result.store.ReadSnapshot(ctx, scope, args.TTL)
+			if err != nil {
+				return nil, err
+			}
+			if found {
+				result.Values = cached.Secrets
+				result.revision = cached.Revision
+				hit = true
+			}
+		}
+		if hit {
+			debug.Record(diagnostics.Event{Kind: diagnostics.CacheState, State: "hit"})
+		} else {
+			debug.Record(diagnostics.Event{Kind: diagnostics.CacheState, State: "miss"})
+			requests := make([]storage.CredentialRequest, 0, len(plan))
+			for _, entry := range plan {
+				if binding, ok := entry.Binding.(source.StoredBinding); ok {
+					requests = append(requests, storage.CredentialRequest{Name: binding.Name, Provider: entry.Provider})
+				}
+			}
+			credentials, err := result.store.AcquireCredentials(ctx, requests)
+			if err != nil {
+				return nil, err
+			}
+			debug.Record(diagnostics.Event{Kind: diagnostics.ProviderState, Operation: "resolve", State: "started"})
+			result.Values, err = source.ResolvePrivate(ctx, cfg.Sources, cfg.SourceSequence, credentials.Value, fetchRemoteProvider)
+			if err != nil {
+				var failure *source.ProviderError
+				if errors.As(err, &failure) {
+					debug.Record(diagnostics.Event{Kind: diagnostics.ProviderFailed, Provider: failure.Provider, Operation: failure.Operation, Failure: failure.Kind})
+				}
+				return nil, err
+			}
+			result.revision = credentials.Revision
+			if err := result.store.WriteSnapshot(ctx, scope, result.revision, result.Values); err != nil {
+				return nil, err
+			}
+			debug.Record(diagnostics.Event{Kind: diagnostics.ProviderState, Operation: "resolve", State: "completed"})
 		}
 	}
 	if patterns := selected.EnvFiles(); len(patterns) > 0 {
@@ -36,10 +114,10 @@ func loadSnapshot(cfg *config.Config, args Args, selected *profile.Profile, debu
 		if err != nil {
 			return nil, err
 		}
+		result.Values = appendSnapshot(result.Values, local, debug)
 		debug.Record(diagnostics.Event{Kind: diagnostics.ProviderState, Provider: "env-files", State: "completed"})
-		snapshot = appendSnapshot(snapshot, local, debug)
 	}
-	return snapshot, nil
+	return result, nil
 }
 
 func appendSnapshot(previous, more *secret.Secrets, debug *diagnostics.Session) *secret.Secrets {
@@ -54,67 +132,4 @@ func appendSnapshot(previous, more *secret.Secrets, debug *diagnostics.Session) 
 		debug.Record(diagnostics.Event{Kind: diagnostics.SourceOverwrite, Original: key})
 	}
 	return previous.Append(more)
-}
-
-func loadMerged(
-	cfg *config.Config,
-	args Args,
-	store storage.Storage,
-	debug *diagnostics.Session,
-) (*secret.Secrets, error) {
-	sources, err := source.LoadAll(cfg.Sources, cfg.SourceSequence)
-	if err != nil {
-		return nil, errors.New("provider initialization failed; check source config and installed CLIs")
-	}
-	scope, err := storage.SourceScope(cfg.Sources, cfg.SourceSequence)
-	if err != nil {
-		return nil, errors.New("invalid source order or configuration")
-	}
-	if !args.Force {
-		snapshot, found, err := store.Read(scope)
-		if err != nil {
-			return nil, errors.New("cached secret snapshot is unreadable or invalid")
-		}
-		if found && !snapshot.IsExpired(args.TTL) {
-			debug.Record(diagnostics.Event{Kind: diagnostics.CacheState, State: "hit"})
-			return snapshot, nil
-		}
-		state := "miss"
-		if found {
-			state = "expired"
-		}
-		debug.Record(diagnostics.Event{Kind: diagnostics.CacheState, State: state})
-	} else {
-		debug.Record(diagnostics.Event{Kind: diagnostics.CacheState, State: "forced"})
-	}
-	merged := secret.New()
-	for _, src := range sources {
-		name := source.Name(src)
-		debug.Record(diagnostics.Event{Kind: diagnostics.ProviderState, Provider: name, State: "started"})
-		more, err := src.GetAllSecrets(merged)
-		if err != nil {
-			var failure *source.ProviderError
-			if errors.As(err, &failure) {
-				var exitCode *int
-				if failure.Kind == "exit" {
-					exitCode = &failure.ExitCode
-				}
-				debug.Record(diagnostics.Event{
-					Kind:      diagnostics.ProviderFailed,
-					Provider:  failure.Provider,
-					Operation: failure.Operation,
-					Failure:   failure.Kind,
-					ExitCode:  exitCode,
-				})
-				return nil, failure
-			}
-			return nil, errors.New("provider fetch failed")
-		}
-		debug.Record(diagnostics.Event{Kind: diagnostics.ProviderState, Provider: name, State: "completed"})
-		merged = appendSnapshot(merged, more, debug)
-	}
-	if err := store.Write(scope, merged); err != nil {
-		return nil, errors.New("cache snapshot write failed")
-	}
-	return merged, nil
 }

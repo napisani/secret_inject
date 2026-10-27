@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -14,7 +15,6 @@ import (
 	"github.com/napisani/secret_inject/internal/config"
 	"github.com/napisani/secret_inject/internal/diagnostics"
 	"github.com/napisani/secret_inject/internal/output"
-	"github.com/napisani/secret_inject/internal/storage"
 )
 
 type Args struct {
@@ -54,6 +54,13 @@ func parseArgs(argv []string, stderr io.Writer) (Args, error) {
 	fs := flag.NewFlagSet(commandName, flag.ContinueOnError)
 	var parseOutput strings.Builder
 	fs.SetOutput(&parseOutput)
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "Usage of "+commandName+":")
+		fs.PrintDefaults()
+		if !args.Check {
+			fmt.Fprintln(fs.Output(), "\nCommands: run, profile list, profile describe, profile check, credential set/list/remove, store prepare, config init/edit\nUse COMMAND --help for its flags.")
+		}
+	}
 	fs.StringVar(&args.ConfigFile, "config", defaultFile, "Config file path")
 	fs.BoolVar(&args.Debug, "debug", false, "Write private rotating debug log")
 	fs.BoolVar(&args.Force, "force", false, "Force refresh, ignore cache")
@@ -101,6 +108,19 @@ func parseArgs(argv []string, stderr io.Writer) (Args, error) {
 func main() { os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr)) }
 
 func runCLI(argv []string, stdout, stderr io.Writer) int {
+	if len(argv) > 0 {
+		switch argv[0] {
+		case "run":
+			return runCommand(argv[1:], stdout, stderr)
+		case "credential":
+			return credentialCommand(argv[1:], stdout, stderr)
+		case "store":
+			return storeCommand(argv[1:], stdout, stderr)
+		}
+	}
+	if len(argv) > 1 && argv[0] == "profile" && (argv[1] == "list" || argv[1] == "describe") {
+		return runProfileInspection(argv[1], argv[2:], stdout, stderr)
+	}
 	if len(argv) > 0 && argv[0] == "config" {
 		if err := runConfigCommand(argv[1:], stdout, stderr); err != nil {
 			fmt.Fprintln(stderr, "Error:", err)
@@ -137,7 +157,9 @@ func runCLI(argv []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
-	data, code, err := execute(args, debug)
+	ctx, stop := commandContext()
+	defer stop()
+	data, code, err := execute(ctx, args, debug)
 	if err != nil {
 		debug.Record(diagnostics.Event{Kind: diagnostics.Failure, Operation: "command"})
 	}
@@ -167,7 +189,7 @@ func writeOutput(w io.Writer, data []byte) error {
 	return nil
 }
 
-func execute(args Args, debug *diagnostics.Session) ([]byte, int, error) {
+func execute(ctx context.Context, args Args, debug *diagnostics.Session) (data []byte, code int, err error) {
 	cfg, err := config.ReadConfig(args.ConfigFile)
 	if err != nil {
 		return nil, 1, errors.New("configuration could not be read or decoded")
@@ -189,24 +211,27 @@ func execute(args Args, debug *diagnostics.Session) ([]byte, int, error) {
 		debug.Record(diagnostics.Event{Kind: diagnostics.ProfileSelected, Profile: args.Profile})
 	}
 	if args.Clean {
-		store, err := storage.Get(cfg.Storage)
-		if err != nil {
-			return nil, 1, errors.New("cache backend unavailable")
-		}
 		debug.Record(diagnostics.Event{Kind: diagnostics.StorageProgress, Operation: "cleanup", State: "started"})
-		if err := store.CleanAll(); err != nil {
+		if err := cleanConfiguredCache(ctx, cfg); err != nil {
 			return nil, 1, errors.New("cache cleanup failed")
 		}
 		debug.Record(diagnostics.Event{Kind: diagnostics.StorageProgress, Operation: "cleanup", State: "completed"})
 		debug.Record(diagnostics.Event{Kind: diagnostics.ResultPrepared, Operation: "clean"})
 		return []byte("Cached secrets cleaned successfully\n"), 0, nil
 	}
-	secrets, err := loadSnapshot(cfg, args, selected, debug)
+	resolved, err := loadSnapshot(ctx, cfg, args, selected, debug)
 	if err != nil {
 		return nil, 1, err
 	}
+	defer func() {
+		err = errors.Join(err, resolved.Close())
+		if err != nil {
+			data = nil
+			code = 1
+		}
+	}()
 	if args.Check {
-		report, events := selected.Check(args.Profile, secrets)
+		report, events := selected.Check(args.Profile, resolved.Values)
 		debug.RecordSelection(events)
 		data, err := json.Marshal(report)
 		if err != nil {
@@ -221,17 +246,23 @@ func execute(args Args, debug *diagnostics.Session) ([]byte, int, error) {
 			Operation: "check",
 			Count:     len(report.MissingIncludes),
 		})
+		if err := resolved.Finish(ctx); err != nil {
+			return nil, 1, err
+		}
 		return append(data, '\n'), code, nil
 	}
-	projected, events, err := selected.Project(secrets)
+	projected, events, err := selected.Project(resolved.Values)
 	debug.RecordSelection(events)
 	if err != nil {
 		return nil, 1, err
 	}
-	data, err := output.Render(projected, args.Output, selected.Overwrite())
+	data, err = output.Render(projected, args.Output, selected.Overwrite())
 	if err != nil {
 		return nil, 1, err
 	}
 	debug.Record(diagnostics.Event{Kind: diagnostics.ResultPrepared, Operation: "export", Count: len(projected.Entries)})
+	if err := resolved.Finish(ctx); err != nil {
+		return nil, 1, err
+	}
 	return data, 0, nil
 }

@@ -48,7 +48,7 @@ func Get(cfg *config.StorageConfig) (Storage, error) {
 	}
 	switch cfg.Type {
 	case "keyring":
-		return NewKeyring(cfg)
+		return nil, ErrStoreUnavailable
 	case "file":
 		return NewFile()
 	default:

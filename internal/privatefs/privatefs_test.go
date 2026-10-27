@@ -3,7 +3,6 @@ package privatefs
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -22,12 +21,10 @@ func TestPrivateFilesAndAtomicReplacement(t *testing.T) {
 	if err != nil || string(got) != "x" {
 		t.Fatal("private replacement failed")
 	}
-	if runtime.GOOS != "windows" {
-		for path, mode := range map[string]os.FileMode{root: 0700, filepath.Join(root, "data"): 0600} {
-			info, err := os.Stat(path)
-			if err != nil || info.Mode().Perm() != mode {
-				t.Fatal("private permissions not enforced")
-			}
+	for path, mode := range map[string]os.FileMode{root: 0700, filepath.Join(root, "data"): 0600} {
+		info, err := os.Stat(path)
+		if err != nil || info.Mode().Perm() != mode {
+			t.Fatal("private permissions not enforced")
 		}
 	}
 	target := filepath.Join(root, "data")

@@ -1,7 +1,9 @@
 # secret_inject feature wishlist
 
-Status: discussion draft. These are desired capabilities, not an approved design
-or a commitment to particular commands, config syntax, or implementation order.
+Status: discussion draft for remaining directions. Private authentication,
+config-only inspection, local env files, and POSIX `run` now have implementations;
+remote/native release conformance is still pending. See the README and
+[conformance gates](unattended-conformance.md) before enabling remote workflows.
 
 ## Direction
 
@@ -11,20 +13,23 @@ and deliver them to a shell, command, or file with deliberate exposure controls.
 
 ## Current baseline
 
-- Doppler, 1Password, and Bitwarden Secrets Manager are already supported together.
-- Sources run in a configured sequence. Earlier results are available to later
-  provider CLIs, allowing credentials from one provider to unlock another.
+- Doppler, 1Password, and Bitwarden provider implementations compose in a configured
+  sequence, but exact unattended releases must be certified before fresh fetching.
+- Earlier declared bootstrap entries can supply a later provider through a private
+  channel, not an ambient or ordinary workload environment.
 - Results merge into one set; later sources overwrite duplicate variable names.
 - Configuration currently allows one source entry per provider type.
 - Output formats already include shell exports, JSON, and env-file text.
-- Fetched values are cached using keyring or development-only plaintext storage.
+- Ordinary remote values and private enrolled credentials share native storage,
+  with separate record roles and store-wide credential revision fencing.
 - Named workflow profiles support star-pattern include/exclude rules, exact key
   renaming, shell overwrite control, and values-free missing-include checks.
 - Caches are scoped by source configuration; `--debug` writes a private rotating
   log without secret values or raw provider output.
 - Profiles can overlay fresh current-directory dotenv files on remote sources,
   or disable remote sources and caches entirely for local-only output.
-- There is no input conversion command or direct command-execution mode today.
+- Config-only profile inspection and Linux/macOS direct command execution exist.
+- Input conversion and multiple instances of one provider remain unimplemented.
 
 ## Wishlist
 
