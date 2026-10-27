@@ -6,10 +6,15 @@ The private-record engine, native adapters, credential commands, private resolve
 inspection, POSIX exec path, migration, and native-capable build configuration are
 implemented. This is **not** a native/provider conformance result.
 
-`certifiedProviderReleases` is intentionally empty. Fresh remote fetching fails
-closed with `provider_version_unsupported`; ordinary tests use synthetic adapters
-at the agreed OS/provider boundaries. Do not populate the matrix from source
-inspection or a successful fake-provider test. There is no runtime bypass.
+Certification gates releases, not ordinary local setup or fetching. Runtime
+provider calls retain private configurations, token-free version probes, version
+output validation, timeouts, and sanitized failures. Version syntax is not proof
+that a particular CLI supports all flags or honors the unattended recipe.
+
+`certifiedProviderReleases` exists only in the `releasegate` tests and is
+intentionally empty. Do not populate that evidence table from source inspection
+or a successful fake-provider test. The migration wizard runs ordinary synthetic
+checks and then asks the operator before native setup and enrollment.
 
 The release workflow requires
 `go test -tags releasegate ./internal/source ./internal/storage`.
@@ -17,7 +22,7 @@ It must fail until all three providers have an exact certified release and all
 shipped native platforms/architectures have reviewed runtime conformance evidence.
 Normal `make check` is an implementation gate, not authorization to release.
 
-## Authority and isolation
+## Release certification authority and isolation
 
 - Do not use a developer's live keyrings, accounts, token environment, vendor
   sessions, or production secrets. Never print credentials, provider references,
@@ -58,10 +63,11 @@ must expose `CONFORMANCE_OK=synthetic-fixture-ok` through its configured fixture
 `SECRET_INJECT_CONFORMANCE_VERSIONS` is non-secret JSON mapping each provider kind
 to its exact candidate version output. It must not contain credentials. Then run
 `go test -tags providerconformance -timeout 5m ./internal/source` under the same
-explicit disposable-account guard. Candidate allowance exists only in tagged
-`_test.go` files; it neither populates the production matrix nor constitutes
-certification. The entrypoint tests successful synthetic reads and invalid-token
-failure through the controlled context. Complete all remaining matrix cells.
+explicit disposable-account guard. The tagged fixture checks each installed
+candidate against the supplied version data before acquiring credentials. It does
+not populate the release evidence table or constitute certification. The entrypoint
+tests successful synthetic reads and invalid-token failure through the controlled
+context. Complete all remaining matrix cells.
 
 ## Native matrix
 
@@ -130,7 +136,9 @@ matrix cell.
 The personal/work JSON assets now declare separate named Doppler roots and no
 file-cache password. Both native backends are allowed in the shared configs;
 `secret_inject` selects the host's backend without Home Manager rewriting the JSON.
-Only perform the documented human preparation/enrollment and activation after
-these gates pass. Explicitly remove old exports/caches/ambient duplicates and
+Human preparation/enrollment and host-local smoke tests do not require release
+certification. Activate the managed config only after that host's fresh-fetch and
+warm-cache checks pass; distributing a certified release still requires the full
+matrix. Explicitly remove old exports/caches/ambient duplicates and
 consider vendor token rotation; neither migration nor local deletion revokes a
 vendor credential automatically.

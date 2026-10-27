@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"regexp"
 	"testing"
 
 	"github.com/napisani/secret_inject/internal/config"
@@ -27,14 +26,12 @@ func TestProviderConformanceDedicatedAccounts(t *testing.T) {
 	if err := json.Unmarshal([]byte(os.Getenv("SECRET_INJECT_CONFORMANCE_VERSIONS")), &versions); err != nil {
 		t.Fatal("exact candidate version data is required")
 	}
-	versionSyntax := regexp.MustCompile(`^(bws )?v?[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$`)
 	for _, provider := range []string{"doppler", "onepassword", "bitwarden"} {
-		if !versionSyntax.MatchString(versions[provider]) {
-			t.Fatal("a candidate version is missing or malformed")
+		version, err := source.ProbeConformanceVersion(t.Context(), provider)
+		if err != nil || version != versions[provider] {
+			t.Fatal("an installed candidate version is missing, malformed, or differs from the fixture")
 		}
 	}
-	restore := source.EnableConformanceCandidates(versions)
-	defer restore()
 	plan, err := source.PlanCredentials(cfg.Sources, cfg.SourceSequence)
 	if err != nil || len(plan) != 3 {
 		t.Fatal("provider fixture needs exactly three bound sources")

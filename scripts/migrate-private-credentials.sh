@@ -230,9 +230,8 @@ ENV_FILE="$STATE_DIR/choices.env"
 ACTIVE_CONFIG="$HOME/.config/.secret_inject.json"
 PYTHON=$(command -v python3) || { warn 'python3 is required.'; exit 1; }
 command -v go >/dev/null 2>&1 || { warn 'Go is required.'; exit 1; }
-[[ -f "$DOC" && -f "$PROJECT/internal/source/release_gate_test.go" &&
-   -f "$PROJECT/internal/storage/native_release_gate_test.go" ]] || {
-  warn 'Required migration source/evidence gates are missing from this checkout.'
+[[ -f "$DOC" && -f "$PROJECT/go.mod" && -f "$PROJECT/cmd/secret_inject/main.go" ]] || {
+  warn 'Required migration source files are missing from this checkout.'
   exit 1
 }
 
@@ -273,23 +272,19 @@ PY
 
 banner 'secret_inject: first private-credential migration'
 
-stage 'Readiness gate: no live changes before this passes'
-say 'This is a one-machine migration, not a certification runner.'
+stage 'Local readiness checks'
+say 'This is a one-machine migration, not a release-certification runner.'
 say 'It never commits, merges, activates Nix, or revokes vendor tokens for you.'
 say 'Do not edit this source checkout while the wizard is running.'
-warn 'Current uncertified source is expected to stop here. There is no override.'
-say "Required evidence and disposable-fixture instructions: $DOC"
-confirm 'Run the Go 1.25 release gates now?' || exit 1
-if ! (cd -- "$PROJECT" && GOTOOLCHAIN=go1.25.0 \
-    go test -count=1 -tags releasegate ./internal/source ./internal/storage); then
-  warn 'STOPPED: release gates failed. No live configuration/store was changed.'
-  say 'Complete reviewed native/provider conformance outside this wizard.'
-  say 'Use dedicated disposable test accounts, not your live account or keyring.'
-  say "Read: $DOC"
-  say 'Rerun this wizard only after the gates pass; do not fill evidence placeholders.'
+warn 'Passing local tests does not certify native platforms or vendor releases.'
+say 'Release certification is separate and does not block local setup.'
+say "Release evidence requirements: $DOC"
+confirm 'Run the ordinary Go 1.25 checks before changing live configuration?' || exit 1
+if ! (cd -- "$PROJECT" && GOTOOLCHAIN=go1.25.0 go test -count=1 ./...); then
+  warn 'STOPPED: local checks failed. No live configuration/store was changed.'
+  say 'Resolve the build or test failures, then rerun this wizard.'
   exit 1
 fi
-confirm 'Has the required real native/provider evidence been reviewed, not merely stubbed?' || exit 1
 
 stage 'Choose the personal or work configuration'
 "$PYTHON" - "$STATE_DIR" "$ENV_FILE" <<'PY'
@@ -407,10 +402,10 @@ SI="$RUN_DIR/secret_inject"
 say "Candidate output: $SI"
 say 'The installed binary, working-tree binary, and active config stay unchanged.'
 command -v doppler >/dev/null 2>&1 || {
-  warn 'Install the reviewed, certified Doppler release on PATH before enrolling.'
+  warn 'Install the Doppler CLI on PATH before enrolling.'
   exit 1
 }
-say 'The fresh fetch will refuse a Doppler release absent from the certified matrix.'
+say 'Fresh fetches validate CLI version output and fail safely on unsupported commands.'
 # The Makefile output is fixed; an isolated output avoids replacing that binary.
 (cd -- "$PROJECT" && GOTOOLCHAIN=go1.25.0 go build -o "$SI" ./cmd/secret_inject)
 chmod 700 "$SI"
@@ -488,7 +483,7 @@ pause 'Press Enter to continue to manual merge and activation.'
 stage 'You merge the PR and activate from your normal checkout'
 open_url 'https://github.com/pulls'
 step 'If the implementation is not merged yet, review/commit/push it and open your monorepo PR.'
-step 'Wait for passing CI and reviewed release evidence, then merge; skip this if already merged.'
+step 'Wait for passing CI, then merge; skip this if already merged.'
 say 'This wizard does not stage, commit, push, merge, or pull any branch.'
 confirm 'Has the PR been merged with the required checks passing?' || exit 1
 step 'In another terminal, update your normal dotfiles/monorepo checkout to merged main.'

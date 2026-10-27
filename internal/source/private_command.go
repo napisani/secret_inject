@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -24,18 +25,7 @@ func sourceCommand(command providerCommand) providerCommand {
 	return runCLICommand
 }
 
-// Entries require the native/provider conformance evidence described in the spec.
-// Source-audited candidates alone cannot authorize an unattended fetch recipe.
-var certifiedProviderReleases = map[string]map[string]bool{}
-
-func certifiedProviderReady(provider string) bool {
-	for version, verified := range certifiedProviderReleases[provider] {
-		if verified && version != "" && version == strings.TrimSpace(version) && !strings.ContainsAny(version, "\r\n\x00") {
-			return true
-		}
-	}
-	return false
-}
+var providerVersionSyntax = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
 
 type providerContext struct {
 	directory   string
@@ -55,9 +45,6 @@ func fetchPrivateProvider(ctx context.Context, provider string, raw json.RawMess
 	if err := src.Init(raw); err != nil {
 		return nil, &ProviderError{Provider: provider, Operation: "initialize", Kind: "configuration", ExitCode: -1}
 	}
-	if !certifiedProviderReady(provider) {
-		return nil, ErrProviderVersion
-	}
 	private, err := newProviderContext(provider)
 	if err != nil {
 		return nil, err
@@ -68,13 +55,8 @@ func fetchPrivateProvider(ctx context.Context, provider string, raw json.RawMess
 			err = errors.Join(err, ErrProviderCleanup)
 		}
 	}()
-	version, err := private.execute(ctx, "", "--version")
-	if err != nil {
+	if _, err := private.version(ctx); err != nil {
 		return nil, err
-	}
-	versionText := strings.TrimSpace(string(version))
-	if versionText == "" || strings.ContainsAny(versionText, "\r\n\x00") || !certifiedProviderReleases[provider][versionText] {
-		return nil, ErrProviderVersion
 	}
 	run := providerCommand(func(_ string, _ []string, args ...string) ([]byte, error) {
 		return private.execute(ctx, token, args...)
@@ -157,6 +139,22 @@ func newProviderContext(provider string) (_ *providerContext, err error) {
 	}
 	success = true
 	return p, nil
+}
+
+func (p *providerContext) version(ctx context.Context) (string, error) {
+	output, err := p.execute(ctx, "", "--version")
+	if err != nil {
+		return "", err
+	}
+	version := strings.TrimSpace(string(output))
+	parsed := version
+	if p.provider == "bitwarden" {
+		parsed = strings.TrimPrefix(parsed, "bws ")
+	}
+	if !providerVersionSyntax.MatchString(parsed) {
+		return "", ErrProviderVersion
+	}
+	return version, nil
 }
 
 func (p *providerContext) execute(parent context.Context, token string, args ...string) ([]byte, error) {

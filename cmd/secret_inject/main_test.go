@@ -26,6 +26,15 @@ func TestMain(m *testing.M) {
 	}
 	name := filepath.Base(os.Args[0])
 	if os.Getenv("SECRET_INJECT_FAKE_PROVIDER") == "1" && (name == "doppler" || name == "op") {
+		for _, arg := range os.Args[1:] {
+			if arg == "--version" {
+				if os.Getenv("DOPPLER_TOKEN") != "" || os.Getenv("OP_SERVICE_ACCOUNT_TOKEN") != "" {
+					os.Exit(18)
+				}
+				fmt.Println(map[string]string{"doppler": "v3.75.1", "op": "2.30.0"}[name])
+				os.Exit(0)
+			}
+		}
 		if marker := os.Getenv("SECRET_INJECT_PROVIDER_MARKER"); marker != "" {
 			if err := os.WriteFile(marker, []byte("called"), 0600); err != nil {
 				os.Exit(17)
@@ -147,7 +156,7 @@ type shortWriter struct{}
 
 func (shortWriter) Write(p []byte) (int, error) { return 0, nil }
 
-func TestUncertifiedFreshFetchIsRefusedBeforeProviderStartup(t *testing.T) {
+func TestFreshFetchDoesNotRequireReleaseCertification(t *testing.T) {
 	path, root := commandFixture(t, true)
 	previous := fetchRemoteProvider
 	fetchRemoteProvider = nil
@@ -155,11 +164,15 @@ func TestUncertifiedFreshFetchIsRefusedBeforeProviderStartup(t *testing.T) {
 	marker := filepath.Join(root, "provider-started")
 	t.Setenv("SECRET_INJECT_PROVIDER_MARKER", marker)
 	code, out, stderr := invoke("--config", path, "--profile", "task", "--output", "json")
-	if code != 1 || out != "" || !strings.Contains(stderr, "not certified") {
-		t.Fatalf("uncertified fetch was not refused: code=%d stderr=%q", code, stderr)
+	if code != 0 || stderr != "" {
+		t.Fatalf("local fresh fetch failed: code=%d stderr=%q", code, stderr)
 	}
-	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatal("an uncertified provider recipe executed")
+	var values map[string]string
+	if err := json.Unmarshal([]byte(out), &values); err != nil || values["API_KEY"] != "FETCHED_SENTINEL" {
+		t.Fatal("local fresh fetch did not deliver the projected workload")
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal("local fresh fetch never reached its provider fixture")
 	}
 }
 

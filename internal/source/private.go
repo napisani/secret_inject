@@ -11,7 +11,7 @@ import (
 )
 
 var ErrPrivateCredential = errors.New("private provider credential unavailable")
-var ErrProviderVersion = errors.New("provider release is not certified for unattended resolution")
+var ErrProviderVersion = errors.New("provider version output is invalid")
 var ErrProviderCleanup = errors.New("private provider context cleanup failed")
 
 type ProviderFetch func(context.Context, string, json.RawMessage, string) (map[string]string, error)

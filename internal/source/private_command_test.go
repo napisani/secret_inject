@@ -2,6 +2,7 @@ package source
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -82,7 +83,11 @@ func providerProcessFixture(name string) {
 		}
 	}
 	if probe {
-		fmt.Println("fixture-1")
+		if value, ok := os.LookupEnv("SECRET_INJECT_FIXTURE_VERSION"); ok {
+			fmt.Print(value)
+		} else {
+			fmt.Println(map[string]string{"doppler": "v3.75.1", "op": "2.30.0", "bws": "bws 1.0.0"}[name])
+		}
 		return
 	}
 	switch name {
@@ -106,7 +111,8 @@ func providerProcessFixture(name string) {
 	}
 }
 
-func TestPrivateProviderProcessesIsolateAuthAndCleanConfigurations(t *testing.T) {
+func privateProviderProcessFixture(t *testing.T) string {
+	t.Helper()
 	root := t.TempDir()
 	bin := filepath.Join(root, "bin")
 	tmp := filepath.Join(root, "tmp")
@@ -138,9 +144,57 @@ func TestPrivateProviderProcessesIsolateAuthAndCleanConfigurations(t *testing.T)
 	for name, value := range map[string]string{"PATH": bin, "TMPDIR": tmp, "TMP": tmp, "TEMP": tmp, "SECRET_INJECT_PROVIDER_HELPER": "1", "DOPPLER_TOKEN": "AMBIENT_PRIVATE_SENTINEL", "OP_SERVICE_ACCOUNT_TOKEN": "AMBIENT_PRIVATE_SENTINEL", "OP_CONNECT_TOKEN": "AMBIENT_PRIVATE_SENTINEL", "OP_CONNECT_HOST": "https://ambient.invalid", "OP_SESSION_work": "AMBIENT_PRIVATE_SENTINEL", "BWS_ACCESS_TOKEN": "AMBIENT_PRIVATE_SENTINEL", "BWS_SERVER_URL": "https://fixture.invalid"} {
 		t.Setenv(name, value)
 	}
-	previous := certifiedProviderReleases
-	certifiedProviderReleases = map[string]map[string]bool{"doppler": {"fixture-1": true}, "onepassword": {"fixture-1": true}, "bitwarden": {"fixture-1": true}}
-	t.Cleanup(func() { certifiedProviderReleases = previous })
+	return tmp
+}
+
+func TestPrivateProviderVersionOutputValidation(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		output   string
+		valid    bool
+	}{
+		{name: "Doppler", provider: "doppler", output: "v3.75.1\n", valid: true},
+		{name: "1Password", provider: "onepassword", output: "2.30.0\n", valid: true},
+		{name: "Bitwarden", provider: "bitwarden", output: "bws 1.0.0\n", valid: true},
+		{name: "prerelease", provider: "doppler", output: "v4.0.0-beta.1+build.9", valid: true},
+		{name: "empty", provider: "doppler"},
+		{name: "malformed", provider: "doppler", output: "PRIVATE_VERSION_SENTINEL"},
+		{name: "multiline", provider: "doppler", output: "v3.75.1\nPRIVATE_VERSION_SENTINEL"},
+		{name: "wrong provider prefix", provider: "onepassword", output: "bws 1.0.0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := privateProviderProcessFixture(t)
+			t.Setenv("SECRET_INJECT_FIXTURE_VERSION", tt.output)
+			private, err := newProviderContext(tt.provider)
+			if err != nil {
+				t.Fatal(err)
+			}
+			version, probeErr := private.version(t.Context())
+			if err := os.RemoveAll(private.directory); err != nil {
+				t.Fatal(err)
+			}
+			if tt.valid {
+				if probeErr != nil || version != strings.TrimSpace(tt.output) {
+					t.Fatal("well-formed private version probe failed")
+				}
+			} else if !errors.Is(probeErr, ErrProviderVersion) || version != "" {
+				t.Fatal("invalid version probe was accepted")
+			}
+			if probeErr != nil && strings.Contains(probeErr.Error(), "SENTINEL") {
+				t.Fatal("version output entered an error")
+			}
+			entries, err := os.ReadDir(root)
+			if err != nil || len(entries) != 0 {
+				t.Fatal("version fixture retained a private configuration")
+			}
+		})
+	}
+}
+
+func TestPrivateProviderProcessesIsolateAuthAndCleanConfigurations(t *testing.T) {
+	tmp := privateProviderProcessFixture(t)
 	configs := map[string]json.RawMessage{
 		"doppler":     json.RawMessage(`{"project":"fixture","env":"fixture","credential":{"kind":"stored","name":"root"}}`),
 		"onepassword": json.RawMessage(`{"secrets":{"WORKLOAD":"op://fixture/item/field"},"credential":{"kind":"from_source","source":"doppler","key":"OP_SERVICE_ACCOUNT_TOKEN"}}`),

@@ -5,18 +5,21 @@ or the environment of a command. Supported platforms are Linux and macOS.
 
 ## Development status: breaking migration
 
-This branch implements private credential storage and unattended resolution.
-**Fresh remote fetches are currently refused:** no exact provider release has
-completed the required conformance matrix. Source-audited candidates are not
-certified. There is no runtime bypass, personal-session fallback, or automatic
-login. The release workflow refuses to publish until all three providers have
-certified releases. See [conformance requirements](docs/unattended-conformance.md).
-Local-only profiles, inspection, and local-only `run` work independently.
+Private credential storage and unattended resolution are available for local use.
+Fresh remote fetches use your installed provider CLI with explicit private
+credentials. Each fetch first validates a token-free version probe; malformed
+version output fails without exposing it. Version-output validation does not
+certify a release or guarantee that every CLI version supports the required flags.
+Unsupported commands and authentication failures return sanitized errors without
+personal-session fallback or automatic login.
 
-Native adapters are implemented for macOS Keychain and Linux Secret Service;
-compiling them does not establish native conformance.
-Do not activate the managed configuration migration before completing its setup
-and release gates.
+Certification is a release-only requirement. The release workflow still refuses
+to publish until all three providers and shipped native platforms have reviewed
+conformance evidence. See [conformance requirements](docs/unattended-conformance.md).
+Local setup and the migration wizard do not require that global release matrix.
+Compiling or smoke-testing the native adapters does not establish conformance.
+Before activating managed configs, complete enrollment and verify fresh fetching
+and warm-cache reuse on that host.
 
 ## Build and check
 
@@ -258,7 +261,8 @@ or output failures stop delivery. Non-debug invocations create no debug logs.
    control or a preview of resolved availability.
 6. Explicitly clean old caches/exports and remove duplicated ambient tokens.
    Consider vendor rotation; local deletion does not revoke a vendor token.
-7. Complete conformance/release gates before activating the managed migration.
+7. Verify fresh fetching and warm-cache reuse before activating that host's
+   managed configuration. Certification remains a separate release requirement.
 
 The managed personal/work configs use separate Doppler record names and allow
 both native backends. Home Manager links the selected config without rewriting it;
@@ -289,8 +293,8 @@ Run the one-time personal/work host migration from a full monorepo checkout:
 bash pub/secret_inject/scripts/migrate-private-credentials.sh
 ```
 
-This host-specific helper requires Go, Python 3, and the certified Doppler CLI.
-It stops before live setup unless the native/provider release gates pass.
+This host-specific helper requires Go, Python 3, and the Doppler CLI.
+It runs ordinary local tests before live setup; release certification is separate.
 It guides terminal-only enrollment and checks warm-cache reuse without provider
 executables on PATH. Merge and Nix activation remain manual.
 

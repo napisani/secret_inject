@@ -5,15 +5,22 @@ package source
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
 )
 
-func EnableConformanceCandidates(versions map[string]string) func() {
-	previous := certifiedProviderReleases
-	certifiedProviderReleases = make(map[string]map[string]bool, len(versions))
-	for provider, version := range versions {
-		certifiedProviderReleases[provider] = map[string]bool{version: true}
+func ProbeConformanceVersion(ctx context.Context, provider string) (version string, err error) {
+	private, err := newProviderContext(provider)
+	if err != nil {
+		return "", err
 	}
-	return func() { certifiedProviderReleases = previous }
+	defer func() {
+		if cleanupErr := os.RemoveAll(private.directory); cleanupErr != nil {
+			version = ""
+			err = errors.Join(err, ErrProviderCleanup)
+		}
+	}()
+	return private.version(ctx)
 }
 
 func FetchConformanceCandidate(ctx context.Context, provider string, raw json.RawMessage, token string) (map[string]string, error) {
