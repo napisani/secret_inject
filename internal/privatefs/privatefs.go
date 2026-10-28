@@ -16,9 +16,21 @@ func EnsureDir(path string) error {
 	if err := mkdirNative(path); err != nil {
 		return err
 	}
-	f, err := openNative(path, os.O_RDONLY, true)
+	f, err := OpenDir(path)
 	if err != nil {
 		return err
+	}
+	return f.Close()
+}
+
+// OpenDir validates and protects an existing directory without creating it.
+func OpenDir(path string) (*os.File, error) {
+	if !filepath.IsAbs(path) {
+		return nil, errors.New("private directory must be absolute")
+	}
+	f, err := openNative(path, os.O_RDONLY, true)
+	if err != nil {
+		return nil, err
 	}
 	info, err := f.Stat()
 	if err == nil && !info.IsDir() {
@@ -27,7 +39,10 @@ func EnsureDir(path string) error {
 	if err == nil {
 		err = protect(f, 0700)
 	}
-	return errors.Join(err, f.Close())
+	if err != nil {
+		return nil, errors.Join(err, f.Close())
+	}
+	return f, nil
 }
 
 // Open refuses symlinks and nonregular files before enforcing current-user access.

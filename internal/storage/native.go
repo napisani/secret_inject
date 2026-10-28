@@ -29,26 +29,22 @@ func nativeBackend(cfg *config.StorageConfig, system string) (string, error) {
 	if cfg.Type != "keyring" || cfg.Password != "" {
 		return "", ErrStoreUnavailable
 	}
-	want := map[string]string{"darwin": "darwin-keychain", "linux": "linux-secret-service"}[system]
-	if want == "" {
-		return "", ErrStoreUnavailable
+	platforms := map[string]string{
+		"darwin-keychain": "darwin", "linux-secret-service": "linux",
+		"linux-systemd-credentials": "linux",
 	}
-	seen := map[string]bool{}
+	selected := map[string]string{}
 	for _, backend := range cfg.AllowedBackends {
-		switch backend {
-		case "darwin-keychain", "linux-secret-service":
-		default:
+		platform, known := platforms[backend]
+		if !known || selected[platform] != "" {
 			return "", ErrStoreUnavailable
 		}
-		if seen[backend] {
-			return "", ErrStoreUnavailable
-		}
-		seen[backend] = true
+		selected[platform] = backend
 	}
-	if !seen[want] {
+	if selected[system] == "" {
 		return "", ErrStoreUnavailable
 	}
-	return want, nil
+	return selected[system], nil
 }
 
 func ValidateNativeConfig(cfg *config.StorageConfig) error {
@@ -78,7 +74,13 @@ func OpenNative(ctx context.Context, cfg *config.StorageConfig, policy StorePoli
 	if err != nil {
 		return nil, err
 	}
-	native, openErr := openNativeAdapter(ctx, policy)
+	var native NativeByteAdapter
+	var openErr error
+	if backend == "linux-systemd-credentials" {
+		native, openErr = openSystemdCredentials(ctx, filepath.Join(privateRoot, "systemd-credentials"), policy)
+	} else {
+		native, openErr = openNativeAdapter(ctx, policy)
+	}
 	err = errors.Join(openErr, release())
 	if err != nil {
 		if native != nil {

@@ -81,6 +81,7 @@ class MigrationWizardTest(unittest.TestCase):
                 ["/bin/bash", "-c", script],
                 env={
                     **os.environ,
+                    "BACKEND": "linux-systemd-credentials",
                     "RUN_DIR": str(run),
                     "CFG": str(config),
                     "ACTIVE_CONFIG": str(config),

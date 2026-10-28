@@ -214,7 +214,7 @@ if [[ "$(id -u)" == 0 ]]; then
 fi
 case "$(uname -s)" in
   Darwin) BACKEND=darwin-keychain ;;
-  Linux) BACKEND=linux-secret-service ;;
+  Linux) BACKEND=linux-systemd-credentials ;;
   *) printf '%s\n' 'This migration supports Linux and macOS only.' >&2; exit 1 ;;
 esac
 
@@ -339,7 +339,7 @@ try:
         raise ValueError("unexpected credential binding")
     if config["profiles"]["shell"] != {"exclude": [], "overwrite": True}:
         raise ValueError("unexpected shell policy")
-    if config["storage"] != {"type": "keyring", "allowed_backends": ["darwin-keychain", "linux-secret-service"]}:
+    if config["storage"] != {"type": "keyring", "allowed_backends": ["darwin-keychain", "linux-systemd-credentials"]}:
         raise ValueError("unexpected native backend allowlist")
     if backend not in config["storage"]["allowed_backends"]:
         raise ValueError("host backend is not allowed")
@@ -414,9 +414,15 @@ say 'Candidate built; config-only shell-profile validation passed.'
 pause 'Press Enter to continue.'
 
 stage 'Explicitly prepare the OS-native store'
-say "Backend: $BACKEND. This step may create/unlock the app store or ask OS approval."
+say "Backend: $BACKEND."
+if [[ "$BACKEND" == darwin-keychain ]]; then
+  say 'Preparation may create/unlock the app keychain or ask OS approval.'
+  warn 'Approve only the expected secret_inject native-store request.'
+else
+  say 'Preparation validates user-scoped systemd encryption and may initialize its host key.'
+  say 'No graphical session or OS-password prompt is used; the host key is root-protected, not TPM-sealed.'
+fi
 say 'Ordinary shell startup never performs interactive recovery.'
-warn 'Approve only the expected secret_inject native-store request.'
 confirm 'Allow explicit native-store preparation now?' || exit 1
 "$SI" store prepare --config "$CFG" >/dev/null
 say 'Native preparation succeeded.'
@@ -526,10 +532,14 @@ except (OSError, ValueError, TypeError):
     raise SystemExit("Active config does not match the staged migration; review host selection/activation.")
 print("  Active config matches the staged sources, binding, native backend, and profiles.")
 PY
-say 'Candidate preparation does not establish readiness for the installed executable.'
-say 'Explicit preparation may show OS unlock and item-access dialogs for several protected items.'
-say 'Approve only the expected installed CLI; choose Always Allow for its item-access prompts if offered.'
-say 'Enter the app-keychain password only in the OS dialog; values are never printed here.'
+say 'Verify native-store readiness with the installed executable as well.'
+if [[ "$BACKEND" == darwin-keychain ]]; then
+  say 'Candidate approval may not transfer; preparation may show OS unlock and item-access dialogs.'
+  say 'Approve only the expected installed CLI; choose Always Allow for its item-access prompts if offered.'
+  say 'Enter the app-keychain password only in the OS dialog; values are never printed here.'
+else
+  say 'Systemd preparation uses the same user-scoped encrypted records without GUI or password prompts.'
+fi
 confirm 'Allow explicit native-store preparation with the installed CLI now?' || exit 1
 "$INSTALLED_CLI" store prepare --config "$ACTIVE_CONFIG"
 verify_cached_export "$INSTALLED_CLI" "$ACTIVE_CONFIG"

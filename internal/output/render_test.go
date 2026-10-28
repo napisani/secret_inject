@@ -16,8 +16,12 @@ func TestRenderShellPreservesConsumingShellState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := "SET=old; EMPTY=''; LOCAL=local; export SET EMPTY;\n" + string(rendered) + "\nprintf '%s\\n' \"$SET\" \"$EMPTY\" \"$LOCAL\" \"$NEW\"; env | grep '^LOCAL=' || :"
-	cmd := exec.Command("sh", "-c", script)
+	shell, err := exec.LookPath("sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := "SET=old; EMPTY=''; LOCAL=local; export SET EMPTY;\n" + string(rendered) + "\nprintf '%s\\n' \"$SET\" \"$EMPTY\" \"$LOCAL\" \"$NEW\"; \"$1\" -c 'test \"${LOCAL+x}\" != x'"
+	cmd := exec.Command(shell, "-c", script, "consuming-shell-test", shell)
 	cmd.Env = []string{"PATH=/usr/bin:/bin"}
 	got, err := cmd.CombinedOutput()
 	if err != nil {

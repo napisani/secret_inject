@@ -26,6 +26,9 @@
           src = ./.;
           subPackages = [ "cmd/secret_inject" ];
           env.CGO_ENABLED = if pkgs.stdenv.hostPlatform.isDarwin then "1" else "0";
+          ldflags = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+            "-X github.com/napisani/secret_inject/internal/storage.systemdCredsExecutable=${pkgs.systemd}/bin/systemd-creds"
+          ];
 
           # This hash locks the dependencies of this package. It is
           # necessary because of how Go requires network access to resolve

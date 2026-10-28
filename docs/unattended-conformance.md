@@ -131,11 +131,35 @@ matching architecture hardware/VMs. Linux compilation alone does not replace its
 runtime fixtures. Keep releases blocked on any unexecuted required
 matrix cell.
 
+## Headless systemd smoke test
+
+The `linux-systemd-credentials` adapter has a separate opt-in synthetic probe:
+
+```sh
+SECRET_INJECT_SYSTEMD_SMOKE=synthetic-only \
+  go test -tags systemdsmoke ./internal/storage \
+  -run '^TestSystemdCredentialsSyntheticHost$' -count=1 -v
+```
+
+It uses a private temporary directory and synthetic bootstrap/workload values,
+not the production store. It exercises native user-scoped encryption, reopening,
+multi-chunk snapshots, cleanup, and credential preservation. It may initialize
+systemd's root-protected host key, so obtain operator approval before running it.
+The encrypted temporary records are removed by the test. It never requests an
+authentication prompt or enrolls a provider token.
+
+The implementation was exercised over SSH on Supermicro with systemd 261.3 and
+no graphical session or TPM. That is host smoke evidence, not reviewed release
+certification for either Linux architecture or the Secret Service adapter.
+Release gates continue to require separately reviewed backend/platform evidence.
+
 ## Managed migration
 
 The personal/work JSON assets now declare separate named Doppler roots and no
-file-cache password. Both native backends are allowed in the shared configs;
-`secret_inject` selects the host's backend without Home Manager rewriting the JSON.
+file-cache password. The shared configs allow `darwin-keychain` and
+`linux-systemd-credentials`; `secret_inject` selects the host's backend without
+Home Manager rewriting the JSON. `linux-secret-service` remains an explicit
+alternative for an existing Secret Service session.
 Human preparation/enrollment and host-local smoke tests do not require release
 certification. Activate the managed config only after that host's fresh-fetch and
 warm-cache checks pass; distributing a certified release still requires the full

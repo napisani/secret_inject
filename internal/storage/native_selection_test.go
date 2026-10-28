@@ -40,6 +40,18 @@ func TestNativeBackendSelectionUsesSystemNotListOrder(t *testing.T) {
 			backends: []string{"linux-secret-service"}, want: "linux-secret-service",
 		},
 		{
+			name: "headless Linux", system: "linux",
+			backends: []string{"darwin-keychain", "linux-systemd-credentials"}, want: "linux-systemd-credentials",
+		},
+		{
+			name: "Mac keeps Keychain", system: "darwin",
+			backends: []string{"linux-systemd-credentials", "darwin-keychain"}, want: "darwin-keychain",
+		},
+		{
+			name: "ambiguous Linux", system: "linux",
+			backends: []string{"linux-secret-service", "linux-systemd-credentials"},
+		},
+		{
 			name: "macOS missing host backend", system: "darwin",
 			backends: []string{"linux-secret-service"},
 		},

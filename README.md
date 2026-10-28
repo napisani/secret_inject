@@ -82,12 +82,46 @@ Example with synthetic identifiers, portable between macOS and Linux:
 }
 ```
 
-`secret_inject` selects `darwin-keychain` on macOS and `linux-secret-service` on Linux.
-List both in `allowed_backends` to share a config across systems, or list only
-the intended host's backend. List order does not affect selection. A missing
-host backend, unknown backend, duplicate entry, or configured storage password
-is rejected. Native access failure never falls back to another backend.
+Choose `darwin-keychain` for macOS. Linux supports `linux-secret-service` for an
+existing Secret Service session, or `linux-systemd-credentials` for headless
+systemd hosts. A portable config may list one backend per operating system.
+List order does not affect selection. Missing, unknown, duplicate, or ambiguous
+backends and configured storage passwords are rejected. Native access failure
+never falls back to another backend.
 Local-only profiles need no storage or provider configuration.
+
+### Headless Linux storage
+
+For a headless systemd host, select:
+
+```json
+{"storage":{"type":"keyring","allowed_backends":["darwin-keychain","linux-systemd-credentials"]}}
+```
+
+This backend requires systemd's user-scoped credential support and its credential
+broker. Run `store prepare` once, then enroll a host-specific provider token with
+`credential set`. No desktop, user D-Bus session, per-shell unlock, or ambient
+provider login is required. After restart the first shell can read the persisted
+records and refresh an expired workload cache; later shells reuse eligible cache
+entries. Missing storage or a missing host key fails closed rather than prompting
+or silently preparing the store.
+
+Records are OS-encrypted files beneath the actual user's
+`~/.secret_inject/systemd-credentials`, not the legacy file-cache format.
+`systemd-creds --user --with-key=host` supplies encryption and authentication;
+no custom cipher or plaintext file is used. The existing record engine still owns
+credentials, revisions, snapshots, chunking, and cleanup. Native-helper input and
+output use private process pipes; enrollment still accepts tokens only from the
+masked terminal prompt. The helper never receives a token through argv or env.
+Nix pins its absolute helper path, so provider-free cache checks need no PATH.
+
+Host-key protection is not TPM sealing: root or someone possessing both the host
+key and encrypted records can decrypt them. Records are bound to the installation,
+UID, and username; copying only the home directory to another host is not a restore
+plan. Protect backups of `/var/lib/systemd/credential.secret`. Losing/replacing the
+host key, changing that identity, or reinstalling the machine may require explicit
+re-enrollment. Host-key initialization is limited to explicit preparation; ordinary
+writes require an existing key. Root-admin races are not an isolation boundary.
 
 ### Private authentication
 
@@ -270,7 +304,8 @@ or output failures stop delivery. Non-debug invocations create no debug logs.
    managed configuration. Certification remains a separate release requirement.
 
 The managed personal/work configs use separate Doppler record names and allow
-both native backends. Home Manager links the selected config without rewriting it;
+`darwin-keychain` plus `linux-systemd-credentials`. Home Manager links the selected
+config without rewriting it;
 `secret_inject` selects the backend for the running system. Source edits do not
 enroll credentials, clear live data, or activate the configuration.
 
