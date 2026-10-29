@@ -5,6 +5,7 @@ package storage_test
 import (
 	"context"
 	"errors"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -20,7 +21,10 @@ func TestNativeConformancePreparedStoreRoundTripAndRoles(t *testing.T) {
 	if err := conformance.RequireDisposableAccount(); err != nil {
 		t.Fatal(err)
 	}
-	backend := map[string]string{"darwin": "darwin-keychain", "linux": "linux-secret-service"}[runtime.GOOS]
+	backend := os.Getenv("SECRET_INJECT_CONFORMANCE_BACKEND")
+	if backend == "" {
+		backend = map[string]string{"darwin": "darwin-keychain", "linux": "linux-secret-service"}[runtime.GOOS]
+	}
 	store, err := storage.OpenNative(t.Context(), &config.StorageConfig{Type: "keyring", AllowedBackends: []string{backend}}, storage.Unattended)
 	if err != nil {
 		t.Fatal("prepared native store could not open unattended")

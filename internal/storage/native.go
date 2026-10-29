@@ -32,6 +32,7 @@ func nativeBackend(cfg *config.StorageConfig, system string) (string, error) {
 	platforms := map[string]string{
 		"darwin-keychain": "darwin", "linux-secret-service": "linux",
 		"linux-systemd-credentials": "linux",
+		"darwin-age":                "darwin", "linux-age": "linux",
 	}
 	selected := map[string]string{}
 	for _, backend := range cfg.AllowedBackends {
@@ -76,9 +77,12 @@ func OpenNative(ctx context.Context, cfg *config.StorageConfig, policy StorePoli
 	}
 	var native NativeByteAdapter
 	var openErr error
-	if backend == "linux-systemd-credentials" {
+	switch backend {
+	case "darwin-age", "linux-age":
+		native, openErr = openAgeFiles(ctx, filepath.Join(privateRoot, "age"), policy)
+	case "linux-systemd-credentials":
 		native, openErr = openSystemdCredentials(ctx, filepath.Join(privateRoot, "systemd-credentials"), policy)
-	} else {
+	default:
 		native, openErr = openNativeAdapter(ctx, policy)
 	}
 	err = errors.Join(openErr, release())

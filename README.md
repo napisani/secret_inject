@@ -84,10 +84,12 @@ Example with synthetic identifiers, portable between macOS and Linux:
 
 Choose `darwin-keychain` for macOS. Linux supports `linux-secret-service` for an
 existing Secret Service session, or `linux-systemd-credentials` for headless
-systemd hosts. A portable config may list one backend per operating system.
-List order does not affect selection. Missing, unknown, duplicate, or ambiguous
-backends and configured storage passwords are rejected. Native access failure
-never falls back to another backend.
+systemd hosts. `darwin-age` and `linux-age` explicitly select age-encrypted files
+with a user-readable local identity instead of OS-managed key custody; see the
+security trade-offs below. A portable config may list one backend per operating
+system. List order does not affect selection. Missing, unknown, duplicate, or
+ambiguous backends and configured storage passwords are rejected. Store access
+failure never falls back to another backend.
 Local-only profiles need no storage or provider configuration.
 
 ### Headless Linux storage
@@ -123,6 +125,64 @@ host key, changing that identity, or reinstalling the machine may require explic
 re-enrollment. Host-key initialization is limited to explicit preparation; ordinary
 writes require an existing key. Root-admin races are not an isolation boundary.
 
+### Headless age file storage
+
+For age storage on macOS while retaining systemd storage on Linux, select:
+
+```json
+{"storage":{"type":"keyring","allowed_backends":["darwin-age","linux-systemd-credentials"]}}
+```
+
+Use `linux-age` instead of `linux-systemd-credentials` to explicitly choose age on
+Linux too. The historical `keyring` configuration type also selects these file
+adapters; it does not imply OS-managed key custody. Managed personal/work configs
+and the migration wizard select age on Darwin and systemd credentials on Linux.
+
+The age backend stores both bootstrap credentials and workload caches through the
+same record engine. It uses the maintained age Go library with a dedicated native
+X25519 identity, not a custom cipher, password, external executable, plugin, or
+background service. No Keychain access, GUI login, application signing identity,
+provider session, or per-shell unlock is needed. Workload TTL, chunking, revision
+fencing, and role-safe cleanup are unchanged; workload TTL does not expire the
+bootstrap credentials.
+
+Explicit `store prepare` or terminal enrollment can initialize an empty store.
+Ordinary export/check/run and cache operations require an existing valid identity
+and never generate one. Prepare and enroll with the selected config:
+
+```sh
+secret_inject store prepare --config ./secrets.json
+secret_inject credential set work-root --provider doppler --config ./secrets.json
+```
+
+The actual OS user's home, not an environment-selected home or cache directory,
+holds `~/.secret_inject/age/identity` and `~/.secret_inject/age/records/*.age`.
+Directories are private (`0700`), files are owner-only (`0600`), and symlinks,
+nonregular files, and wrong owners are rejected. Record publication is atomic and
+synced; the identity is published without overwriting an existing key. Each
+ciphertext includes an encrypted version/name binding, so renaming it to another
+record name fails binding validation. Adapter-level filename enumeration does not
+decrypt records. No credential or identity value is printed by setup or metadata
+commands.
+
+**This has weaker key custody than Keychain or a root-held systemd host key.** The
+identity itself is unencrypted key material readable by your OS user. A process
+that can read both the identity and records can decrypt them; a backup containing
+both is equally sensitive. Age protects a record-only leak, not same-user malware,
+root compromise, or copying the complete store. A separately generated identity
+is not hardware-, UID-, or machine-bound. Use FileVault on macOS and encrypted
+backups; the backend does not verify either policy. Keep the identity out of
+repositories, diagnostic uploads, and routine cache archives. Do not treat this
+as equivalent OS-keystore protection for long-lived provider tokens.
+
+There is no automatic import, migration, key rotation, or plaintext fallback.
+Switching from a native backend selects a separate store and requires explicit
+re-enrollment. Cache cleanup preserves the identity and bootstrap credentials.
+Missing or malformed keys fail closed; preparation refuses to generate a new
+identity if encrypted records remain. Recover a trusted identity backup or
+explicitly retire the unusable store and re-enroll. Never replace the identity
+alone while retaining records encrypted to the old key.
+
 ### Private authentication
 
 All remote export/check/run operations require explicit bindings. Ambient
@@ -150,7 +210,8 @@ secret_inject credential remove work-root --config ./secrets.json
 - `store prepare` can create/unlock/request OS authorization without replacing
   credentials or changing their revision. It probes current protected items for
   access without decoding or exporting their values; obsolete payloads are skipped.
-  On macOS, enter the app-keychain password only in OS dialogs, never CLI arguments.
+  With `darwin-keychain`, enter the app-keychain password only in OS dialogs,
+  never CLI arguments.
   Approval can be item- and executable-specific: use the final installed binary,
   not a temporary build. Choose persistent approval for that binary when offered
   so later invocations can run unattended. The CLI does not rewrite item ACLs or
@@ -304,7 +365,7 @@ or output failures stop delivery. Non-debug invocations create no debug logs.
    managed configuration. Certification remains a separate release requirement.
 
 The managed personal/work configs use separate Doppler record names and allow
-`darwin-keychain` plus `linux-systemd-credentials`. Home Manager links the selected
+`darwin-age` plus `linux-systemd-credentials`. Home Manager links the selected
 config without rewriting it;
 `secret_inject` selects the backend for the running system. Source edits do not
 enroll credentials, clear live data, or activate the configuration.

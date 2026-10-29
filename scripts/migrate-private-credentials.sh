@@ -213,7 +213,7 @@ if [[ "$(id -u)" == 0 ]]; then
   exit 1
 fi
 case "$(uname -s)" in
-  Darwin) BACKEND=darwin-keychain ;;
+  Darwin) BACKEND=darwin-age ;;
   Linux) BACKEND=linux-systemd-credentials ;;
   *) printf '%s\n' 'This migration supports Linux and macOS only.' >&2; exit 1 ;;
 esac
@@ -339,8 +339,8 @@ try:
         raise ValueError("unexpected credential binding")
     if config["profiles"]["shell"] != {"exclude": [], "overwrite": True}:
         raise ValueError("unexpected shell policy")
-    if config["storage"] != {"type": "keyring", "allowed_backends": ["darwin-keychain", "linux-systemd-credentials"]}:
-        raise ValueError("unexpected native backend allowlist")
+    if config["storage"] != {"type": "keyring", "allowed_backends": ["darwin-age", "linux-systemd-credentials"]}:
+        raise ValueError("unexpected backend allowlist")
     if backend not in config["storage"]["allowed_backends"]:
         raise ValueError("host backend is not allowed")
     with os.fdopen(os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as stream:
@@ -413,19 +413,21 @@ chmod 700 "$SI"
 say 'Candidate built; config-only shell-profile validation passed.'
 pause 'Press Enter to continue.'
 
-stage 'Explicitly prepare the OS-native store'
+stage 'Explicitly prepare the selected protected store'
 say "Backend: $BACKEND."
-if [[ "$BACKEND" == darwin-keychain ]]; then
-  say 'Preparation may create/unlock the app keychain or ask OS approval.'
-  warn 'Approve only the expected secret_inject native-store request.'
+if [[ "$BACKEND" == darwin-age ]]; then
+  say 'Preparation creates or validates the private age identity; no Keychain or GUI prompt is used.'
+  warn 'The identity is readable by your user; a copy of it and the records permits decryption.'
+  warn 'Use FileVault and encrypted backups. This is weaker key custody than Keychain.'
+  say 'Existing Keychain credentials are not imported; this separate store needs enrollment.'
 else
   say 'Preparation validates user-scoped systemd encryption and may initialize its host key.'
   say 'No graphical session or OS-password prompt is used; the host key is root-protected, not TPM-sealed.'
 fi
 say 'Ordinary shell startup never performs interactive recovery.'
-confirm 'Allow explicit native-store preparation now?' || exit 1
+confirm 'Allow explicit protected-store preparation now?' || exit 1
 "$SI" store prepare --config "$CFG" >/dev/null
-say 'Native preparation succeeded.'
+say 'Store preparation succeeded.'
 pause 'Press Enter to continue.'
 
 stage 'Enroll or keep the provider-typed Doppler record'
@@ -450,7 +452,7 @@ PY
 ENROLL=yes
 if [[ "$EXISTING" == yes ]]; then
   say "The $ROOT_NAME Doppler record already exists. Keeping it is the default."
-  warn 'Replacing it invalidates ALL workload snapshots in this native store.'
+  warn 'Replacing it invalidates ALL workload snapshots in this shared store.'
   if ! confirm 'Replace the existing record with a token entered at the CLI prompt?'; then
     ENROLL=no
   fi
@@ -530,17 +532,15 @@ try:
         raise ValueError("installed config differs")
 except (OSError, ValueError, TypeError):
     raise SystemExit("Active config does not match the staged migration; review host selection/activation.")
-print("  Active config matches the staged sources, binding, native backend, and profiles.")
+print("  Active config matches the staged sources, binding, backend, and profiles.")
 PY
-say 'Verify native-store readiness with the installed executable as well.'
-if [[ "$BACKEND" == darwin-keychain ]]; then
-  say 'Candidate approval may not transfer; preparation may show OS unlock and item-access dialogs.'
-  say 'Approve only the expected installed CLI; choose Always Allow for its item-access prompts if offered.'
-  say 'Enter the app-keychain password only in the OS dialog; values are never printed here.'
+say 'Verify store readiness with the installed executable as well.'
+if [[ "$BACKEND" == darwin-age ]]; then
+  say 'Age preparation validates the same private identity without executable-specific approvals.'
 else
   say 'Systemd preparation uses the same user-scoped encrypted records without GUI or password prompts.'
 fi
-confirm 'Allow explicit native-store preparation with the installed CLI now?' || exit 1
+confirm 'Allow explicit protected-store preparation with the installed CLI now?' || exit 1
 "$INSTALLED_CLI" store prepare --config "$ACTIVE_CONFIG"
 verify_cached_export "$INSTALLED_CLI" "$ACTIVE_CONFIG"
 write_env INSTALLED_CLI "$INSTALLED_CLI"
@@ -577,7 +577,7 @@ PY
 if [[ "$LEGACY_KIND" == legacy ]]; then
   say "Cleanup uses the saved legacy config: $LEGACY_BACKUP"
   warn 'Deletion is irreversible; it removes owned legacy cache entries, not vendor tokens.'
-  say 'It cannot import/decode the old cache and does not delete enrolled native roots.'
+  say 'It cannot import/decode the old cache and does not delete enrolled roots.'
   if confirm 'Delete the owned legacy cache entries now?'; then
     "$SI" --config "$LEGACY_BACKUP" --clean >/dev/null
     say 'Legacy cache cleanup succeeded.'
@@ -590,12 +590,12 @@ fi
 pause 'Finish reviewing obsolete copies; press Enter for the summary.'
 
 finish
-say "Migrated scope: $MIGRATION_SCOPE; native record: $ROOT_NAME ($BACKEND)."
+say "Migrated scope: $MIGRATION_SCOPE; credential record: $ROOT_NAME ($BACKEND)."
 say 'Verified the candidate and installed CLI use a warm snapshot without provider lookup.'
 say 'No provider token was captured as a wizard answer or written to choices.env/GitHub.'
 say "Private state and backup retained: $STATE_DIR"
 say 'Remove this temporary helper from the repository after all hosts migrate; keep backups private.'
-say 'Future refreshes still need a valid enrolled token and a prepared/unlocked native store.'
+say 'Future refreshes still need a valid enrolled token and a prepared protected store.'
 }
 
 run_wizard "$@"; exit

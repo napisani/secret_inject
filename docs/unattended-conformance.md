@@ -55,6 +55,11 @@ SECRET_INJECT_CONFORMANCE_AUTHORIZED=disposable-account-only \
 The native entrypoint exercises real prepared-store CRUD, bounded-size credential
 and workload objects, role-safe cleanup, and revision fencing. Complete the
 remaining negative/race/UI matrix below separately before recording evidence.
+Set `SECRET_INJECT_CONFORMANCE_BACKEND` to explicitly exercise another prepared
+backend, such as `darwin-age`, `linux-age`, or `linux-systemd-credentials`, in that
+same disposable account. Without this selector, the fixture uses Keychain on
+macOS or Secret Service on Linux. The selector does not bypass configuration
+validation or the disposable-account guard.
 
 The provider entrypoint additionally requires `SECRET_INJECT_CONFORMANCE_CONFIG`
 to name a private configuration containing three direct stored bindings. Enroll
@@ -153,13 +158,40 @@ no graphical session or TPM. That is host smoke evidence, not reviewed release
 certification for either Linux architecture or the Secret Service adapter.
 Release gates continue to require separately reviewed backend/platform evidence.
 
+## Age file backend checks
+
+`darwin-age` and `linux-age` are explicit alternatives, not OS-managed keystores.
+Their identity is a user-readable private file; copying it with the ciphertext
+allows decryption elsewhere. Neither FileVault, encrypted backups, hardware
+binding, nor app-exclusive custody is provided or verified by this adapter.
+Long-lived bootstrap token storage uses this weaker custody model only when the
+operator explicitly selects the age backend.
+
+Ordinary storage tests generate synthetic identities and values in temporary
+directories only. They cover preparation, unattended reopening, identity
+preservation/loss/replacement, ciphertext tampering/truncation/name binding,
+private-file rules, bounded values, cancellation, multi-chunk snapshots, revision
+fencing, and cleanup that preserves credentials. An independent test executable
+reads an existing synthetic cache with an empty PATH; on Darwin that executable
+is ad-hoc signed with a different identifier. No production store or provider
+credential is used. These checks do not populate release certification evidence.
+
+Before certifying each shipped platform/architecture, also review concurrent
+process coordination and interrupted identity/record publication on its actual
+filesystem. Prove that a lost identity cannot be silently regenerated over an
+existing encrypted store, setup cannot overwrite a key, malformed native identity
+input never invokes a passphrase/plugin interaction, and error/metadata output
+never contains key material or plaintext. The release evidence table includes
+age backend/platform pairs and remains empty until reviewed evidence exists.
+
 ## Managed migration
 
 The personal/work JSON assets now declare separate named Doppler roots and no
-file-cache password. The shared configs allow `darwin-keychain` and
+file-cache password. The shared configs allow `darwin-age` and
 `linux-systemd-credentials`; `secret_inject` selects the host's backend without
-Home Manager rewriting the JSON. `linux-secret-service` remains an explicit
-alternative for an existing Secret Service session.
+Home Manager rewriting the JSON. The migration wizard uses the same host choices
+and warns about age's user-readable identity before preparation. `darwin-keychain`
+and `linux-secret-service` remain explicit alternatives for OS-managed key custody.
 Human preparation/enrollment and host-local smoke tests do not require release
 certification. Activate the managed config only after that host's fresh-fetch and
 warm-cache checks pass; distributing a certified release still requires the full

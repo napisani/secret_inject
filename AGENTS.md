@@ -25,7 +25,11 @@ Prefer the `make` targets over invoking `go` directly.
 - **Language**: Go. Standard `gofmt` formatting.
 - **Errors**: return explicit errors; no panics (proper error handling is a stated project goal — see README).
 - **Secret backends**: each manager (Doppler `doppler`, 1Password `op`, Bitwarden `bws`) is invoked via its own CLI; keep backend logic isolated behind a common interface in `internal/`.
-- **Caching**: credentials and workload snapshots share macOS Keychain or Linux Secret Service with a configurable workload TTL. File storage is retained only for explicit legacy cache cleanup.
+- **Storage**: credentials and workload snapshots use one `RecordStore` engine.
+  Select Keychain, Secret Service, systemd credentials, or age explicitly; never
+  fall back between them. Age uses a user-readable key, not OS-managed key custody.
+  See `README.md` for backend selection and security trade-offs. The old plaintext
+  file cache is retained only for explicit legacy cleanup.
 - **Output formats**: support shell, JSON, and env-file output — keep these consistent when adding fields.
 
 ## Release

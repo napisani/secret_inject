@@ -12,6 +12,8 @@ func TestReleaseRequiresNativeRuntimeConformance(t *testing.T) {
 		"darwin-keychain/darwin/amd64", "darwin-keychain/darwin/arm64",
 		"linux-secret-service/linux/amd64", "linux-secret-service/linux/arm64",
 		"linux-systemd-credentials/linux/amd64", "linux-systemd-credentials/linux/arm64",
+		"darwin-age/darwin/amd64", "darwin-age/darwin/arm64",
+		"linux-age/linux/amd64", "linux-age/linux/arm64",
 	} {
 		if nativeConformanceEvidence[platform] == "" {
 			t.Errorf("native runtime conformance is unverified for %s; release is blocked", platform)

@@ -47,6 +47,80 @@ class MigrationWizardTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(trace.read_text().splitlines(), ["test", "-count=1", "./..."])
 
+    def test_managed_configs_select_age_on_darwin_and_systemd_on_linux(self):
+        wizard = Path(__file__).with_name("migrate-private-credentials.sh").read_text()
+        selection_start = wizard.index('case "$(uname -s)" in')
+        selection_end = wizard.index("\nesac", selection_start) + len("\nesac")
+        start = wizard.index("stage 'Choose the personal or work configuration'")
+        end = wizard.index("stage 'Preserve the existing configuration privately'", start)
+        repo = Path(__file__).resolve().parents[3]
+        for system, backend in (("Darwin", "darwin-age"), ("Linux", "linux-systemd-credentials")):
+            for scope in ("personal", "work"):
+                with self.subTest(system=system, scope=scope):
+                    with tempfile.TemporaryDirectory(prefix="secret-inject-managed-config-") as temporary:
+                        root = Path(temporary)
+                        state = root / "state" / "secret_inject" / "migration"
+                        script = (
+                            "set -eu\n"
+                            "stage() { :; }; say() { :; }; warn() { :; }; pause() { :; }; write_env() { :; }\n"
+                            'uname() { printf "%s\\n" "$FIXTURE_SYSTEM"; }\n'
+                            'ask() { printf -v "$1" "%s" "$FIXTURE_SCOPE"; }\n'
+                            + wizard[selection_start:selection_end] + "\n"
+                            + wizard[start:end]
+                            + '\nprintf "%s" "$BACKEND" > "$SELECTED_BACKEND"\n'
+                        )
+                        result = subprocess.run(
+                            ["/bin/bash", "-c", script],
+                            env={
+                                **os.environ,
+                                "FIXTURE_SYSTEM": system,
+                                "FIXTURE_SCOPE": scope,
+                                "SELECTED_BACKEND": str(root / "backend"),
+                                "STATE_DIR": str(state),
+                                "ENV_FILE": str(state / "choices.env"),
+                                "PYTHON": sys.executable,
+                                "REPO": str(repo),
+                            },
+                            capture_output=True, text=True, timeout=10,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual((root / "backend").read_text(), backend)
+                        staged = list(state.glob("run.*/native-config.json"))
+                        self.assertEqual(len(staged), 1)
+                        config = json.loads(staged[0].read_text())
+                        self.assertIn(backend, config["storage"]["allowed_backends"])
+                        self.assertEqual(config["storage"]["allowed_backends"],
+                                         ["darwin-age", "linux-systemd-credentials"])
+
+    def test_age_setup_warns_before_preparation(self):
+        wizard = Path(__file__).with_name("migrate-private-credentials.sh").read_text()
+        start = wizard.index("stage 'Explicitly prepare the selected protected store'")
+        end = wizard.index("stage 'Enroll or keep the provider-typed Doppler record'", start)
+        with tempfile.TemporaryDirectory(prefix="secret-inject-age-warning-") as temporary:
+            root = Path(temporary)
+            trace = root / "trace"
+            cli = root / "cli"
+            cli.write_text('#!/bin/sh\nprintf "prepare\\n" >> "$TRACE"\n')
+            cli.chmod(0o700)
+            script = (
+                "set -eu\n"
+                "stage() { :; }; say() { :; }; pause() { :; }\n"
+                'warn() { printf "%s\\n" "$*" >> "$TRACE"; }\n'
+                'confirm() { printf "confirm\\n" >> "$TRACE"; }\n'
+                + wizard[start:end]
+            )
+            result = subprocess.run(
+                ["/bin/bash", "-c", script],
+                env={**os.environ, "BACKEND": "darwin-age", "SI": str(cli),
+                     "CFG": str(root / "config.json"), "TRACE": str(trace)},
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            events = trace.read_text().splitlines()
+            self.assertIn("identity is readable by your user", events[0])
+            self.assertIn("weaker key custody than Keychain", events[1])
+            self.assertEqual(events[2:], ["confirm", "prepare"])
+
     def test_installed_binary_prepares_access_before_cache_only_check(self):
         wizard = Path(__file__).with_name("migrate-private-credentials.sh").read_text()
         start = wizard.index("stage 'Verify the activated config, binary, and fresh-shell startup'")

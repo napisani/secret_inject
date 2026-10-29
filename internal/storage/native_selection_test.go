@@ -48,6 +48,30 @@ func TestNativeBackendSelectionUsesSystemNotListOrder(t *testing.T) {
 			backends: []string{"linux-systemd-credentials", "darwin-keychain"}, want: "darwin-keychain",
 		},
 		{
+			name: "headless Mac age", system: "darwin",
+			backends: []string{"darwin-age", "linux-systemd-credentials"}, want: "darwin-age",
+		},
+		{
+			name: "Linux keeps systemd", system: "linux",
+			backends: []string{"darwin-age", "linux-systemd-credentials"}, want: "linux-systemd-credentials",
+		},
+		{
+			name: "portable age on Linux", system: "linux",
+			backends: []string{"darwin-age", "linux-age"}, want: "linux-age",
+		},
+		{
+			name: "ambiguous Mac age", system: "darwin",
+			backends: []string{"darwin-keychain", "darwin-age"},
+		},
+		{
+			name: "ambiguous Linux age", system: "linux",
+			backends: []string{"linux-age", "linux-systemd-credentials"},
+		},
+		{
+			name: "bare age is not a fallback", system: "darwin",
+			backends: []string{"darwin-keychain", "age"},
+		},
+		{
 			name: "ambiguous Linux", system: "linux",
 			backends: []string{"linux-secret-service", "linux-systemd-credentials"},
 		},

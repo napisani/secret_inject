@@ -3,13 +3,10 @@ package storage
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"errors"
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/napisani/secret_inject/internal/privatefs"
@@ -103,125 +100,39 @@ func (*systemdCredentials) MaxValueBytes() int { return systemdValueLimit }
 func (*systemdCredentials) Close() error       { return nil }
 
 func systemdObjectName(key string) (string, error) {
-	if key == "" || len(key) > 180 {
-		return "", ErrStoreOperation
+	return encryptedObjectName(key, ".cred")
+}
+
+func (s *systemdCredentials) files() *encryptedFiles {
+	return &encryptedFiles{
+		directory: s.directory, extension: ".cred",
+		valueLimit: systemdValueLimit, cipherLimit: systemdCipherLimit,
+		encrypt: func(ctx context.Context, name string, value []byte) ([]byte, error) {
+			if err := s.hostKeyReady(); err != nil {
+				return nil, err
+			}
+			return s.crypt(ctx, "encrypt", name, value)
+		},
+		decrypt: func(ctx context.Context, name string, value []byte) ([]byte, error) {
+			return s.crypt(ctx, "decrypt", name, value)
+		},
 	}
-	return base64.RawURLEncoding.EncodeToString([]byte(key)) + ".cred", nil
 }
 
 func (s *systemdCredentials) Get(ctx context.Context, key string) ([]byte, bool, error) {
-	name, err := systemdObjectName(key)
-	if err != nil {
-		return nil, false, err
-	}
-	file, err := privatefs.Open(filepath.Join(s.directory, name), os.O_RDONLY)
-	if os.IsNotExist(err) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, ErrStoreOperation
-	}
-	cipher, readErr := io.ReadAll(io.LimitReader(file, systemdCipherLimit+1))
-	closeErr := file.Close()
-	if readErr != nil || closeErr != nil || len(cipher) > systemdCipherLimit {
-		return nil, false, ErrStoreOperation
-	}
-	plain, err := s.crypt(ctx, "decrypt", name, cipher)
-	if err != nil {
-		return nil, false, err
-	}
-	return plain, true, nil
+	return s.files().Get(ctx, key)
 }
 
 func (s *systemdCredentials) Put(ctx context.Context, key string, value []byte) error {
-	if len(value) > s.MaxValueBytes() {
-		return ErrStoreOperation
-	}
-	name, err := systemdObjectName(key)
-	if err != nil {
-		return err
-	}
-	if err := s.hostKeyReady(); err != nil {
-		return err
-	}
-	cipher, err := s.crypt(ctx, "encrypt", name, value)
-	if err != nil {
-		return err
-	}
-	if err := privatefs.WriteAtomic(s.directory, name, cipher); err != nil {
-		return safeStoreFailure(err)
-	}
-	return s.syncDirectory()
+	return s.files().Put(ctx, key, value)
 }
 
 func (s *systemdCredentials) Delete(ctx context.Context, key string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	name, err := systemdObjectName(key)
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(s.directory, name)
-	file, err := privatefs.Open(path, os.O_RDONLY)
-	if os.IsNotExist(err) {
-		return s.syncDirectory()
-	}
-	if err != nil {
-		return ErrStoreOperation
-	}
-	if err := file.Close(); err != nil {
-		return ErrStoreOperation
-	}
-	if err := os.Remove(path); err != nil {
-		if os.IsNotExist(err) {
-			return s.syncDirectory()
-		}
-		return ErrStoreOperation
-	}
-	return s.syncDirectory()
-}
-
-func (s *systemdCredentials) syncDirectory() error {
-	directory, err := privatefs.OpenDir(s.directory)
-	if err != nil {
-		return ErrStoreOperation
-	}
-	return safeStoreFailure(errors.Join(directory.Sync(), directory.Close()))
+	return s.files().Delete(ctx, key)
 }
 
 func (s *systemdCredentials) Keys(ctx context.Context) ([]string, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	directory, err := privatefs.OpenDir(s.directory)
-	if err != nil {
-		return nil, ErrStoreUnavailable
-	}
-	entries, readErr := directory.ReadDir(-1)
-	closeErr := directory.Close()
-	if readErr != nil || closeErr != nil {
-		return nil, ErrStoreOperation
-	}
-	keys := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".cred") {
-			continue
-		}
-		if !entry.Type().IsRegular() {
-			return nil, ErrStoreOperation
-		}
-		key, err := base64.RawURLEncoding.DecodeString(strings.TrimSuffix(entry.Name(), ".cred"))
-		if err != nil {
-			return nil, ErrRecordCorrupt
-		}
-		name, err := systemdObjectName(string(key))
-		if err != nil || name != entry.Name() {
-			return nil, ErrRecordCorrupt
-		}
-		keys = append(keys, string(key))
-	}
-	return keys, nil
+	return s.files().Keys(ctx)
 }
 
 func (s *systemdCredentials) crypt(ctx context.Context, operation, name string, input []byte) ([]byte, error) {
