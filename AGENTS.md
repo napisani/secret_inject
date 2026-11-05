@@ -18,6 +18,8 @@ Prefer the `make` targets over invoking `go` directly.
 
 - `cmd/secret_inject/` — CLI entrypoint and command wiring.
 - `internal/` — implementation: secret-manager clients, caching, keyring, output formats.
+- `skills/secret-inject/` — user-facing agent skill for running the CLI without leaking values into chat context.
+  Update it when commands, value-free outputs, or error codes change.
 - Module path: `github.com/napisani/secret_inject`.
 
 ## Code Style & Conventions
