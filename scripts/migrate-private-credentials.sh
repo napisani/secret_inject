@@ -312,8 +312,8 @@ say 'Personal uses personal-doppler; work uses loancrate-doppler.'
 say "This host uses the $BACKEND backend. Only choices/paths enter choices.env."
 ask MIGRATION_SCOPE 'Type personal or work (Enter keeps a saved choice):'
 case "$MIGRATION_SCOPE" in
-  personal) ROOT_NAME=personal-doppler; DOPPLER_CONFIG=personal; ASSET=personal_secret_inject.json ;;
-  work) ROOT_NAME=loancrate-doppler; DOPPLER_CONFIG=loancrate; ASSET=loancrate_secret_inject.json ;;
+  personal) ROOT_NAME=personal-doppler; DOPPLER_CONFIG=personal ;;
+  work) ROOT_NAME=loancrate-doppler; DOPPLER_CONFIG=loancrate ;;
   *) warn 'Choose exactly personal or work, then rerun.'; exit 1 ;;
 esac
 write_env MIGRATION_SCOPE "$MIGRATION_SCOPE"
@@ -321,7 +321,7 @@ RUN_DIR=$(mktemp -d "$STATE_DIR/run.XXXXXX")
 CFG="$RUN_DIR/native-config.json"
 EMPTY_PATH="$RUN_DIR/no-provider-path"
 mkdir -- "$EMPTY_PATH"
-"$PYTHON" - "$REPO/pub/dotfiles-nix/mods/dotfiles/$ASSET" "$CFG" "$BACKEND" "$ROOT_NAME" "$DOPPLER_CONFIG" <<'PY'
+"$PYTHON" - "$REPO/pub/dotfiles-nix/mods/dotfiles/mise/apps/secret-inject.json.tera" "$CFG" "$BACKEND" "$ROOT_NAME" "$DOPPLER_CONFIG" <<'PY'
 import json
 import os
 import sys
@@ -329,7 +329,11 @@ import sys
 source, destination, backend, root, environment = sys.argv[1:]
 try:
     with open(source, encoding="utf-8") as stream:
-        config = json.load(stream)
+        selection, body = stream.read().split("{% endif %}", 1)
+    # mise renders the same template from the host's agent profile.
+    if f'{{% set doppler = "{environment}" %}}' not in selection:
+        raise ValueError("unexpected profile selection")
+    config = json.loads(body.replace("{{ doppler }}", environment))
     doppler = config["sources"]["doppler"]
     if set(config["sources"]) != {"doppler"}:
         raise ValueError("unexpected source set")
